@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 from model_jit import JiT_models
 
-
 class Denoiser(nn.Module):
     def __init__(
         self,
@@ -46,23 +45,75 @@ class Denoiser(nn.Module):
         z = torch.randn(n, device=device) * self.P_std + self.P_mean
         return torch.sigmoid(z)
 
-    def forward(self, x, labels):
-        labels_dropped = self.drop_labels(labels) if self.training else labels
+    def forward(self, x_rainy, x_clean):
+        """
+        注意：现在 forward 需要同时接收带雨图和干净图！
+        """
+        dummy_labels = torch.zeros(x_rainy.size(0), dtype=torch.long, device=x_rainy.device)
 
-        t = self.sample_t(x.size(0), device=x.device).view(-1, *([1] * (x.ndim - 1)))
-        e = torch.randn_like(x) * self.noise_scale
+        # 1. 随机采样时间步 t (范围 0~1)
+        # t=0 代表完全是雨图，t=1 代表完全是干净图
+        t = torch.rand(x_rainy.size(0), device=x_rainy.device).view(-1, *([1] * (x_rainy.ndim - 1)))
 
-        z = t * x + (1 - t) * e
-        v = (x - z) / (1 - t).clamp_min(self.t_eps)
+        # 2. 图像插值混合 (Rectified Flow 核心公式)
+        z = t * x_clean + (1 - t) * x_rainy
 
-        x_pred = self.net(z, t.flatten(), labels_dropped)
-        v_pred = (x_pred - z) / (1 - t).clamp_min(self.t_eps)
+        # 3. 网络看着混合后的图像 z，预测终点 (完全干净的图)
+        x_pred = self.net(z, t.flatten(), dummy_labels)
+        
+        return x_pred
 
-        # l2 loss
-        loss = (v - v_pred) ** 2
-        loss = loss.mean(dim=(1, 2, 3)).mean()
+    # def forward(self, x, labels):
+    #     labels_dropped = self.drop_labels(labels) if self.training else labels
 
-        return loss
+    #     t = self.sample_t(x.size(0), device=x.device).view(-1, *([1] * (x.ndim - 1)))
+    #     e = torch.randn_like(x) * self.noise_scale
+
+    #     z = t * x + (1 - t) * e
+    #     v = (x - z) / (1 - t).clamp_min(self.t_eps)
+
+    #     x_pred = self.net(z, t.flatten(), labels_dropped)
+    #     v_pred = (x_pred - z) / (1 - t).clamp_min(self.t_eps)
+
+    #     # l2 loss
+    #     loss = (v - v_pred) ** 2
+    #     loss = loss.mean(dim=(1, 2, 3)).mean()
+
+    #     return loss
+    # ==========================================
+    # 2. 推理阶段：10步渐进式去雨 (Euler ODE 求解器)
+    # ==========================================
+    @torch.no_grad()
+    def generate_i2i(self, x_rainy, steps=10):
+        """
+        在推理时调用此函数，传入带雨图和步数 (默认10步)
+        """
+        z = x_rainy.clone()
+        bsz = z.size(0)
+        device = z.device
+        dummy_labels = torch.zeros(bsz, dtype=torch.long, device=device)
+
+        # 构建时间轴: 例如 steps=10 时，t 从 0.0, 0.1, 0.2 ... 到 1.0
+        timesteps = torch.linspace(0.0, 1.0, steps + 1, device=device).view(-1, *([1] * z.ndim)).expand(-1, bsz, -1, -1, -1)
+
+        # 逐步演化
+        for i in range(steps):
+            t = timesteps[i]
+            t_next = timesteps[i + 1]
+
+            # 1. 网络预测终点 (x_clean)
+            x_pred = self.net(z, t.flatten(), dummy_labels)
+
+            # 2. 计算当前时刻的去雨速度 (Velocity)
+            # 数学推导: v = (x_clean - z) / (1 - t)
+            v_pred = (x_pred - z) / (1.0 - t).clamp_min(self.t_eps)
+
+            # 3. 往前走一小步 (Euler Step)
+            # z_next = z_current + Δt * v
+            z = z + (t_next - t) * v_pred
+
+        # 最终的 z 就是到达 t=1 时的干净去雨图
+        return z
 
     @torch.no_grad()
     def generate(self, labels):

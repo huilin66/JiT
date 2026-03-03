@@ -15,9 +15,47 @@ from util.crop import center_crop_arr
 import util.misc as misc
 
 import copy
-from engine_jit import train_one_epoch, evaluate
+from engine_jit import train_one_epoch, evaluate_best_metric
 
 from denoiser import Denoiser
+
+from dataset import PairedRainDataset, ValPatchDataset
+from loss import DynamicRaindropLoss
+import torch
+import copy
+import util.misc as misc
+
+from engine_jit import train_one_epoch, evaluate_best_metric
+import os
+import random
+import numpy as np
+import torch
+
+def set_seed(seed=42):
+    # 1. 设置 Python 环境变量
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    # 对于 PyTorch 1.8+，强制 cuBLAS 使用确定性算法
+    os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':4096:8' 
+    
+    # 2. 设置 Python 内置随机种子
+    random.seed(seed)
+    
+    # 3. 设置 Numpy 随机种子
+    np.random.seed(seed)
+    
+    # 4. 设置 PyTorch 随机种子
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed) # 如果使用多GPU
+    
+    # 5. 配置 cuDNN
+    # 禁用 cuDNN 自动寻找最快算法的机制（因为最快算法往往有随机性）
+    torch.backends.cudnn.benchmark = False 
+    # 强制 cuDNN 使用确定性算法
+    torch.backends.cudnn.deterministic = True 
+    
+    # 6. 强制 PyTorch 使用确定性算法 (可选，可能会导致程序报错如果使用了不支持确定性的操作)
+    # torch.use_deterministic_algorithms(True)
 
 
 def get_args_parser():
@@ -31,7 +69,7 @@ def get_args_parser():
     parser.add_argument('--proj_dropout', type=float, default=0.0, help='Projection dropout rate')
 
     # training
-    parser.add_argument('--epochs', default=200, type=int)
+    parser.add_argument('--epochs', default=600, type=int)
     parser.add_argument('--warmup_epochs', type=int, default=5, metavar='N',
                         help='Epochs to warm up LR')
     parser.add_argument('--batch_size', default=128, type=int,
@@ -70,9 +108,9 @@ def get_args_parser():
                         help='ODE samping method')
     parser.add_argument('--num_sampling_steps', default=50, type=int,
                         help='Sampling steps')
-    parser.add_argument('--cfg', default=1.0, type=float,
+    parser.add_argument('--cfg', default=2.9, type=float,
                         help='Classifier-free guidance factor')
-    parser.add_argument('--interval_min', default=0.0, type=float,
+    parser.add_argument('--interval_min', default=0.1, type=float,
                         help='CFG interval min')
     parser.add_argument('--interval_max', default=1.0, type=float,
                         help='CFG interval max')
@@ -82,11 +120,11 @@ def get_args_parser():
                         help='Frequency (in epochs) for evaluation')
     parser.add_argument('--online_eval', action='store_true')
     parser.add_argument('--evaluate_gen', action='store_true')
-    parser.add_argument('--gen_bsz', type=int, default=256,
+    parser.add_argument('--gen_bsz', type=int, default=128,
                         help='Generation batch size')
 
     # dataset
-    parser.add_argument('--data_path', default='./data/imagenet', type=str,
+    parser.add_argument('--data_path', default=r'/scrinvme/huilin/bdd/cp_data/raindrop_remove_2026/RainDrop_Train', type=str,
                         help='Path to the dataset')
     parser.add_argument('--class_num', default=1000, type=int)
 
@@ -110,6 +148,8 @@ def get_args_parser():
                         help='URL used to set up distributed training')
 
     return parser
+
+
 
 
 def main(args):
@@ -138,13 +178,21 @@ def main(args):
 
     # Data augmentation transforms
     transform_train = transforms.Compose([
-        transforms.Lambda(lambda img: center_crop_arr(img, args.img_size)),
+        # transforms.Lambda(lambda img: center_crop_arr(img, args.img_size)),
+        transforms.RandomCrop(args.img_size),
         transforms.RandomHorizontalFlip(),
         transforms.PILToTensor()
     ])
 
-    dataset_train = datasets.ImageFolder(os.path.join(args.data_path, 'train'), transform=transform_train)
-    print(dataset_train)
+    # Create paired rain dataset
+    dataset_train = PairedRainDataset(
+        rain_dir=os.path.join(args.data_path, 'Drop'),
+        clean_dir=os.path.join(args.data_path, 'Clear'),
+        transform=transform_train
+    )
+
+    # dataset_train = datasets.ImageFolder(os.path.join(args.data_path, 'train'), transform=transform_train)
+    # print(dataset_train)
 
     sampler_train = torch.utils.data.DistributedSampler(
         dataset_train, num_replicas=num_tasks, rank=global_rank, shuffle=True
@@ -158,6 +206,36 @@ def main(args):
         pin_memory=args.pin_mem,
         drop_last=True
     )
+
+
+    # === 构建锚点验证集 (Anchor Validation Set) ===
+    # 验证集不需要随机翻转，只要固定的中心裁剪即可
+    transform_val = transforms.Compose([
+        transforms.Lambda(lambda img: center_crop_arr(img, args.img_size)),
+        transforms.PILToTensor()
+    ])
+
+    dataset_val_full = ValPatchDataset(
+        rain_dir=os.path.join(args.data_path, 'Drop'),
+        clean_dir=os.path.join(args.data_path, 'Clear'),
+        # transform=transform_val
+    )
+
+    # 从训练集里固定抠出前 100 张图片当验证集
+    num_val_images = min(100, len(dataset_val_full))
+    dataset_val = torch.utils.data.Subset(dataset_val_full, range(num_val_images))
+
+    # SequentialSampler 保证每次验证的顺序相同
+    sampler_val = torch.utils.data.SequentialSampler(dataset_val) 
+    
+    data_loader_val = torch.utils.data.DataLoader(
+        dataset_val, sampler=sampler_val,
+        batch_size=args.batch_size // 16, # 验证时不需要存梯度，但为了防 OOM，batch_size 减半
+        num_workers=args.num_workers,
+        pin_memory=args.pin_mem,
+        drop_last=False
+    )
+    # ===============================================
 
     torch._dynamo.config.cache_size_limit = 128
     torch._dynamo.config.optimize_ddp = False
@@ -179,13 +257,31 @@ def main(args):
     print("Actual lr: {:.2e}".format(args.lr))
     print("Effective batch size: %d" % eff_batch_size)
 
-    model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
-    model_without_ddp = model.module
+
+    local_rank = int(os.environ.get("LOCAL_RANK", 0))
+    torch.cuda.set_device(local_rank)
+
+    if getattr(args, 'distributed', False):
+        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank])
+        model_without_ddp = model.module
+    else:
+        # 单卡模式下，直接使用原模型
+        model_without_ddp = model
+    # model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank])
+    # model_without_ddp = model.module
 
     # Set up optimizer with weight decay adjustment for bias and norm layers
     param_groups = misc.add_weight_decay(model_without_ddp, args.weight_decay)
     optimizer = torch.optim.AdamW(param_groups, lr=args.lr, betas=(0.9, 0.95))
     print(optimizer)
+
+    criterion = DynamicRaindropLoss(
+        device=device, 
+        target_w_rec=1.0, 
+        target_w_ssim=1.0,   # 对应指标公式的 10
+        target_w_lpips=0.5,  # 对应指标公式的 5
+        total_epochs=args.epochs 
+    )
 
     # Resume from checkpoint if provided
     checkpoint_path = os.path.join(args.resume, "checkpoint-last.pth") if args.resume else None
@@ -220,12 +316,13 @@ def main(args):
 
     # Training loop
     print(f"Start training for {args.epochs} epochs")
+    best_score = -float('inf')
     start_time = time.time()
     for epoch in range(args.start_epoch, args.epochs):
         if args.distributed:
             data_loader_train.sampler.set_epoch(epoch)
 
-        train_one_epoch(model, model_without_ddp, data_loader_train, optimizer, device, epoch, log_writer=log_writer, args=args)
+        train_one_epoch(model, criterion, model_without_ddp, data_loader_train, optimizer, device, epoch, log_writer=log_writer, args=args)
 
         # Save checkpoint periodically
         if epoch % args.save_last_freq == 0 or epoch + 1 == args.epochs:
@@ -244,13 +341,33 @@ def main(args):
                 optimizer=optimizer,
                 epoch=epoch
             )
+        # 2. 💡 重点：每隔 1 个或几个 Epoch 算一次 PSNR
+        # 建议每隔 5 个 epoch 算一次，免得等太久
+        if epoch % 5 == 0 or epoch + 1 == args.epochs:
+            val_score = evaluate_best_metric(model_without_ddp, data_loader_val, device)
+            print(f"Epoch [{epoch}] - score: {val_score:.4f}")
+            
+            if log_writer is not None:
+                log_writer.add_scalar('val_composite_score', val_score, epoch)
+            
+            # 破纪录判定！
+            if val_score > best_score:
+                best_score = val_score
+                print(f"New Best score: {best_score:.4f}, saving...")
+                misc.save_model(
+                    args=args,
+                    model_without_ddp=model_without_ddp,
+                    optimizer=optimizer,
+                    epoch=epoch,
+                    epoch_name="best"
+                )
 
-        # Perform online evaluation at specified intervals
-        if args.online_eval and (epoch % args.eval_freq == 0 or epoch + 1 == args.epochs):
-            torch.cuda.empty_cache()
-            with torch.no_grad():
-                evaluate(model_without_ddp, args, epoch, batch_size=args.gen_bsz, log_writer=log_writer)
-            torch.cuda.empty_cache()
+        # # Perform online evaluation at specified intervals
+        # if args.online_eval and (epoch % args.eval_freq == 0 or epoch + 1 == args.epochs):
+        #     torch.cuda.empty_cache()
+        #     with torch.no_grad():
+        #         evaluate(model_without_ddp, args, epoch, batch_size=args.gen_bsz, log_writer=log_writer)
+        #     torch.cuda.empty_cache()
 
         if misc.is_main_process() and log_writer is not None:
             log_writer.flush()
@@ -261,6 +378,7 @@ def main(args):
 
 
 if __name__ == '__main__':
+    set_seed(42)
     args = get_args_parser().parse_args()
     Path(args.output_dir).mkdir(parents=True, exist_ok=True)
     main(args)
