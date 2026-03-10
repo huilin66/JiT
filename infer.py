@@ -124,9 +124,9 @@ def zip_results(result_dir, csv_path, zip_path="submission.zip"):
     print(f"zip result save to {zip_path}\n")
 
 
-def batch_predict(weight_name, select_name,  step_num = 10, pred_scene=True, path_in=False, device=1):
+def batch_predict(weight_name, select_name,  step_num = 10, use_bg_subnet=False, use_scene_dataset=True, path_in=False, device=1):
     device = torch.device(f"cuda:{device}" if torch.cuda.is_available() else "cpu")
-    print(f"load {weight_name}/{select_name}, pred scene{pred_scene}, device: {device} ...")
+    print(f"load {weight_name}/{select_name}, pred scene{use_scene_dataset}, device: {device} ...")
 
     data_root = r'/scrinvme/huilin/bdd/cp_data/raindrop_remove_2026'
     ckpt_path = f"output/{weight_name}/16/checkpoint-{select_name}.pth" if path_in else f"{data_root}/output/{weight_name}/16/checkpoint-{select_name}.pth"
@@ -137,7 +137,7 @@ def batch_predict(weight_name, select_name,  step_num = 10, pred_scene=True, pat
     csv_file_path = "readme.txt"
     os.makedirs(save_dir, exist_ok=True)
     scene_pred_path = save_dir + "_scene.json"
-    if pred_scene:
+    if use_scene_dataset:
         if os.path.exists(scene_pred_path):
             with open(scene_pred_path, "r") as f:
                 scene_dict = json.load(f)
@@ -147,6 +147,7 @@ def batch_predict(weight_name, select_name,  step_num = 10, pred_scene=True, pat
             )
 
     args = get_args_parser().parse_args()
+    args.use_bg_subnet = use_bg_subnet
     model = Denoiser(args)
     checkpoint = torch.load(ckpt_path, map_location="cpu")
 
@@ -169,7 +170,7 @@ def batch_predict(weight_name, select_name,  step_num = 10, pred_scene=True, pat
 
         x = input_data["img"].to(device).to(torch.float32).div_(255.0)
         x = x * 2.0 - 1.0
-        if pred_scene:
+        if use_scene_dataset:
             scene_id = scene_dict[img_name]
             dummy_labels = (
                 torch.zeros(x.shape[0], dtype=torch.long, device=x.device) + scene_id
@@ -191,26 +192,34 @@ def batch_predict(weight_name, select_name,  step_num = 10, pred_scene=True, pat
 if __name__ == "__main__":
 
     weight_names = [
-        # "JiT-B-raindrop01",
+        "JiT-B-raindrop01",
         "JiT-B-raindrop03",
         "JiT-B-raindrop01",
         "JiT-B-raindrop03",
     ]
-    pred_scenes = [
-        # False,
-        True,
-        True,
-        False,
-    ]
     path_list = [
-        # True,
+        True,
         False,
         True,
         False
     ]
+    use_bg_subnet_list = [
+        False,
+        True,
+        False,
+        True,
+    ]
+    use_scene_dataset = [
+        False,
+        True,
+        True,
+        False,
+    ]
     select_name = ["last", "best"]
 
-    for weight_name, pred_scene, path_in in zip(weight_names, pred_scenes, path_list):
-        batch_predict(weight_name, select_name[0], pred_scene=pred_scene, path_in=path_in)
-        batch_predict(weight_name, select_name[1], pred_scene=pred_scene, path_in=path_in)
+    for i in range(len(weight_names)):
+        if i ==0:
+            continue
+        batch_predict(weight_names[i], select_name[0], use_bg_subnet=use_bg_subnet_list[i],use_scene_dataset=use_scene_dataset[i], path_in=path_list[i])
+        batch_predict(weight_names[i], select_name[1], use_bg_subnet=use_bg_subnet_list[i],use_scene_dataset=use_scene_dataset[i], path_in=path_list[i])
 
