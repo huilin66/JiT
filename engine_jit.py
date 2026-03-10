@@ -33,7 +33,7 @@ def train_one_epoch(model, criterion, model_without_ddp, data_loader, optimizer,
     if log_writer is not None:
         print('log_dir: {}'.format(log_writer.log_dir))
 
-    for data_iter_step, (img_drop, img_clear) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
+    for data_iter_step, (img_drop, img_clear, dummy_labels) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
         # per iteration (instead of per epoch) lr scheduler
         lr_sched.adjust_learning_rate(optimizer, data_iter_step / len(data_loader) + epoch, args)
 
@@ -43,8 +43,10 @@ def train_one_epoch(model, criterion, model_without_ddp, data_loader, optimizer,
         y = img_clear.to(device, non_blocking=True).to(torch.float32).div_(255)
         y = y * 2.0 - 1.0
 
+        dummy_labels.to(device)
+
         with torch.amp.autocast('cuda', dtype=torch.bfloat16):
-            y_pred = model(x, y)
+            y_pred = model(x, y, dummy_labels)
 
         loss = criterion(y_pred, y)
 
@@ -95,60 +97,59 @@ def evaluate_best_metric(model_without_ddp, data_loader_val, device):
         ema_state_dict[name] = model_without_ddp.ema_params1[i]
     model_without_ddp.load_state_dict(ema_state_dict)
 
+    total_scores = {
+        'score': 0.0,
+        'psnr': 0.0,
+        'ssim': 0.0,
+        'lpips': 0.0,
+    }
     total_score = 0.0
     num_samples = 0
-
     print("Running composite evaluation (PSNR, SSIM, LPIPS) on validation subset...")
-    for img_drop, img_clear in data_loader_val:
+    for img_drop, img_clear, dummy_labels in data_loader_val:
         B, N, C, H, W = img_drop.shape
-        # 预处理到 [-1, 1] 范围
-
         x = img_drop.view(-1, C, H, W).to(device, non_blocking=True)
         y = img_clear.view(-1, C, H, W).to(device, non_blocking=True)
-
+        dummy_labels = dummy_labels.to(device)
         x = x.to(torch.float32).div_(255.0) * 2.0 - 1.0
         y = y.to(torch.float32).div_(255.0) * 2.0 - 1.0
-
         with torch.amp.autocast('cuda', dtype=torch.bfloat16):
-            # 推理 5 步即可
-            pred_x = model_without_ddp.generate_i2i(x, steps=5) 
+            pred_x = model_without_ddp.generate_i2i(x, steps=5, dummy_labels=dummy_labels)
             pred_clamp = pred_x.clamp(-1.0, 1.0)
-        
-        # ---------------------------------------------------------
-        # 💡 核心指标计算
-        # ---------------------------------------------------------
-        # 1. 计算 LPIPS (LPIPS 官方模型要求输入范围是 [-1, 1])
-        # 注意：lpips_vgg 输出的 shape 是 [B, 1, 1, 1]
         val_lpips = lpips_vgg(pred_clamp, y).mean().item()
-
-        # 将张量转换到 [0, 1] 范围，用于计算 PSNR 和 SSIM
         pred_01 = (pred_clamp + 1.0) / 2.0
         y_01 = (y + 1.0) / 2.0
 
-        # 2. 计算 PSNR
         mse = torch.mean((pred_01 - y_01) ** 2, dim=[1, 2, 3])
         val_psnr = -10 * torch.log10(mse + 1e-8).mean().item()
-
-        # 3. 计算 SSIM (输入范围 [0, 1])
-        # 如果你没装 piq，可以用你在 loss.py 里自己写的 SSIM 替代
         val_ssim = ssim(pred_01, y_01, data_range=1.0).item()
 
-        # 💥 4. 计算综合得分 (越大越好)
         composite_score = val_psnr + 10.0 * val_ssim - 5.0 * val_lpips
-        # ---------------------------------------------------------
 
-        total_score += composite_score * x.size(0)
+        total_scores['score'] += composite_score * x.size(0)
+        total_scores['psnr'] += val_psnr * x.size(0)
+        total_scores['ssim'] += val_ssim * x.size(0)
+        total_scores['lpips'] += val_lpips * x.size(0)
         num_samples += x.size(0)
 
     # 计算平均得分
-    avg_score = total_score / max(1, num_samples)
+    total_scores['score'] = total_scores['score'] / max(1, num_samples)
+    total_scores['psnr'] = total_scores['psnr'] / max(1, num_samples)
+    total_scores['ssim'] = total_scores['ssim'] / max(1, num_samples)
+    total_scores['lpips'] = total_scores['lpips'] / max(1, num_samples)
 
     # 2. 验证结束，把权重切回到在线训练状态
     model_without_ddp.load_state_dict(model_state_dict)
     model_without_ddp.train()
 
     # DDP 多卡同步均值
-    avg_score_tensor = torch.tensor(avg_score).cuda()
-    avg_score_reduce = misc.all_reduce_mean(avg_score_tensor).item()
+    total_scores['score'] = torch.tensor(total_scores['score']).cuda()
+    total_scores['psnr'] = torch.tensor(total_scores['psnr']).cuda()
+    total_scores['ssim'] = torch.tensor(total_scores['ssim']).cuda()
+    total_scores['lpips'] = torch.tensor(total_scores['lpips']).cuda()
+    total_scores['score'] = misc.all_reduce_mean(total_scores['score']).item()
+    total_scores['psnr'] = misc.all_reduce_mean(total_scores['psnr']).item()
+    total_scores['ssim'] = misc.all_reduce_mean(total_scores['ssim']).item()
+    total_scores['lpips'] = misc.all_reduce_mean(total_scores['lpips']).item()
 
-    return avg_score_reduce
+    return total_scores

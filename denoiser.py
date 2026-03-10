@@ -14,6 +14,7 @@ class Denoiser(nn.Module):
             num_classes=args.class_num,
             attn_drop=args.attn_dropout,
             proj_drop=args.proj_dropout,
+            use_bg_subnet = args.use_bg_subnet,
         )
         self.img_size = args.img_size
         self.num_classes = args.class_num
@@ -45,12 +46,14 @@ class Denoiser(nn.Module):
         z = torch.randn(n, device=device) * self.P_std + self.P_mean
         return torch.sigmoid(z)
 
-    def forward(self, x_rainy, x_clean):
+    def forward(self, x_rainy, x_clean, dummy_labels=None):
         """
         注意：现在 forward 需要同时接收带雨图和干净图！
         """
-        dummy_labels = torch.zeros(x_rainy.size(0), dtype=torch.long, device=x_rainy.device)
-
+        if dummy_labels is None:
+            dummy_labels = torch.zeros(x_rainy.size(0), dtype=torch.long, device=x_rainy.device)
+        else:
+            dummy_labels = dummy_labels.squeeze(-1)
         # 1. 随机采样时间步 t (范围 0~1)
         # t=0 代表完全是雨图，t=1 代表完全是干净图
         t = torch.rand(x_rainy.size(0), device=x_rainy.device).view(-1, *([1] * (x_rainy.ndim - 1)))
@@ -84,15 +87,17 @@ class Denoiser(nn.Module):
     # 2. 推理阶段：10步渐进式去雨 (Euler ODE 求解器)
     # ==========================================
     @torch.no_grad()
-    def generate_i2i(self, x_rainy, steps=10):
+    def generate_i2i(self, x_rainy, steps=10, dummy_labels=None):
         """
         在推理时调用此函数，传入带雨图和步数 (默认10步)
         """
         z = x_rainy.clone()
         bsz = z.size(0)
         device = z.device
-        dummy_labels = torch.zeros(bsz, dtype=torch.long, device=device)
-
+        if dummy_labels is None:
+            dummy_labels = torch.zeros(bsz, dtype=torch.long, device=device)
+        else:
+            dummy_labels = dummy_labels.squeeze(-1).view(-1)
         # 构建时间轴: 例如 steps=10 时，t 从 0.0, 0.1, 0.2 ... 到 1.0
         timesteps = torch.linspace(0.0, 1.0, steps + 1, device=device).view(-1, *([1] * z.ndim)).expand(-1, bsz, -1, -1, -1)
 

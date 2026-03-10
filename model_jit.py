@@ -94,7 +94,8 @@ class LabelEmbedder(nn.Module):
 def scaled_dot_product_attention(query, key, value, dropout_p=0.0) -> torch.Tensor:
     L, S = query.size(-2), key.size(-2)
     scale_factor = 1 / math.sqrt(query.size(-1))
-    attn_bias = torch.zeros(query.size(0), 1, L, S, dtype=query.dtype).cuda()
+
+    attn_bias = torch.zeros(query.size(0), 1, L, S, dtype=query.dtype, device=query.device)
 
     with torch.cuda.amp.autocast(enabled=False):
         attn_weight = query.float() @ key.float().transpose(-2, -1) * scale_factor
@@ -202,6 +203,56 @@ class JiTBlock(nn.Module):
         return x
 
 
+class BackgroundRestorationSubnet(nn.Module):
+    """
+    Background Restoration Subnetwork to enhance image details.
+    Consists of multiple convolutional layers after Restormer output.
+    """
+
+    def __init__(self, in_channels, hidden_channels=64, num_layers=4):
+        super(BackgroundRestorationSubnet, self).__init__()
+
+        layers = []
+
+        # First conv
+        layers.append(nn.Conv2d(in_channels, hidden_channels, 3, 1, 1, bias=True))
+        layers.append(nn.GELU())
+
+        # Middle layers with residual
+        self.residual_blocks = nn.ModuleList()
+        for _ in range(num_layers - 2):
+            block = nn.Sequential(
+                nn.Conv2d(hidden_channels, hidden_channels, 3, 1, 1, bias=True),
+                nn.GELU(),
+                nn.Conv2d(hidden_channels, hidden_channels, 3, 1, 1, bias=True),
+            )
+            self.residual_blocks.append(block)
+
+        # Output conv
+        layers.append(nn.Conv2d(hidden_channels, 3, 3, 1, 1, bias=True))
+
+        self.input_conv = nn.Sequential(
+            nn.Conv2d(in_channels, hidden_channels, 3, 1, 1, bias=True),
+            nn.GELU(),
+        )
+        self.output_conv = nn.Conv2d(hidden_channels, 3, 3, 1, 1, bias=True)
+
+            
+    def forward(self, x):
+        """
+        Args:
+            x: [B, C, H, W] features from Restormer decoder
+        Returns:
+            [B, 3, H, W] enhanced residual
+        """
+        feat = self.input_conv(x)
+
+        for block in self.residual_blocks:
+            feat = feat + block(feat)
+
+        out = self.output_conv(feat)
+        return out
+
 class JiT(nn.Module):
     """
     Just image Transformer.
@@ -220,9 +271,11 @@ class JiT(nn.Module):
         num_classes=1000,
         bottleneck_dim=128,
         in_context_len=32,
-        in_context_start=8
+        in_context_start=8,
+        use_bg_subnet=False,
     ):
         super().__init__()
+        self.use_bg_subnet = use_bg_subnet
         self.in_channels = in_channels
         self.out_channels = in_channels
         self.patch_size = patch_size
@@ -273,7 +326,14 @@ class JiT(nn.Module):
 
         # linear predict
         self.final_layer = FinalLayer(hidden_size, patch_size, self.out_channels)
-
+        
+        if self.use_bg_subnet==1:
+            self.bg_subnet = BackgroundRestorationSubnet(
+                in_channels=3,
+                hidden_channels=64,
+                num_layers=4
+            )
+            
         self.initialize_weights()
 
     def initialize_weights(self):
@@ -354,7 +414,14 @@ class JiT(nn.Module):
         x = x[:, self.in_context_len:]
 
         x = self.final_layer(x, c)
+
         output = self.unpatchify(x, self.patch_size)
+
+        if self.use_bg_subnet:
+            bg_residual = self.bg_subnet(output)
+            output = output + bg_residual
+        else:
+            output = output
 
         return output
 
