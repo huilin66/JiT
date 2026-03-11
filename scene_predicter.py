@@ -258,10 +258,14 @@ def batch_predict_and_save(model_path, infer_dir, scene_json):
     print(f"💡 文件内容预览: \n{json.dumps(preview, indent=4)}")
 
     return predictions_dict
+
+
 if __name__ == "__main__":
     # 1. 先执行训练 (大概几分钟就能跑完)
-    train_classifier()
+    # train_classifier()
 
-    # 2. 训练完后，你可以随便挑一张图片测试一下它的识别能力
-    # test_img_path = r'填入某张带雨图的绝对路径'
-    # predict_scene(test_img_path)
+    data_root = (
+        r"/scrinvme/huilin/bdd/cp_data/raindrop_remove_2026/RainDrop_Train2/Drop"
+    )
+    save_path = r"/scrinvme/huilin/bdd/cp_data/raindrop_remove_2026/RainDrop_Train2/Drop_scen_pred.json"
+    batch_predict_and_save("scene_classifier_resnet18.pth", data_root, save_path)

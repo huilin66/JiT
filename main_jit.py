@@ -333,9 +333,9 @@ def main(args):
     param_groups = misc.add_weight_decay(model_without_ddp, args.weight_decay)
     optimizer = torch.optim.AdamW(param_groups, lr=args.lr, betas=(0.9, 0.95))
     print(optimizer)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=args.epochs - args.warmup_epochs, eta_min=1e-6
-    )
+    # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+    #     optimizer, T_max=args.epochs - args.warmup_epochs, eta_min=1e-6
+    # )
     print(optimizer)
     criterion = DynamicRaindropLoss(
         device=device,
@@ -454,8 +454,8 @@ def main(args):
         if misc.is_main_process() and log_writer is not None:
             log_writer.flush()
 
-        if epoch >= args.warmup_epochs:
-            scheduler.step()
+        # if epoch >= args.warmup_epochs:
+        #     scheduler.step()
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print("Training time:", total_time_str)
