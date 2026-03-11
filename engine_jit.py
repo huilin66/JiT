@@ -22,7 +22,7 @@ lpips_vgg = None
 def train_one_epoch(model, criterion, model_without_ddp, data_loader, optimizer, device, epoch, log_writer=None, args=None):
     model.train(True)
     metric_logger = misc.MetricLogger(delimiter="  ")
-    metric_logger.add_meter('lr', misc.SmoothedValue(window_size=1, fmt='{value:.6f}'))
+    metric_logger.add_meter('lr', misc.SmoothedValue(window_size=1, fmt='{value:.8f}'))
     header = 'Epoch: [{}]'.format(epoch)
     print_freq = 20
     
