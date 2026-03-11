@@ -186,16 +186,8 @@ def predict_scene(img_path, model_path="scene_classifier_resnet18.pth"):
 
 
 def batch_predict_and_save(model_path, infer_dir, scene_json):
-    # ================= 配置区 =================
-    # 你的测试集/验证集带雨图像所在的文件夹 (注意：这里假设是存放图片的平铺目录)
-    # 如果你的测试集也有子文件夹，请告诉我，我帮你改成 os.walk 遍历
-    # TEST_DIR = r"/scrinvme/huilin/bdd/cp_data/raindrop_remove_2026/RainDrop_Test/Drop"
-    # MODEL_PATH = "scene_classifier_resnet18.pth"
-    # OUTPUT_JSON = "test_scene_predictions.json"
-    # ==========================================
-
     DEVICE = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
-    print(f"Scene predict with {DEVICE}")
+    print(f"[Scene] predict with {DEVICE}")
 
     # 1. 初始化相同的预处理逻辑
     val_transform = transforms.Compose(
@@ -208,7 +200,6 @@ def batch_predict_and_save(model_path, infer_dir, scene_json):
     )
 
     # 2. 加载训练好的 ResNet18
-    print("🤖 加载场景分类器模型权重...")
     if not os.path.exists(model_path):
         print(f"❌ 找不到模型权重文件: {model_path}，请先运行训练脚本！")
         return
@@ -224,10 +215,9 @@ def batch_predict_and_save(model_path, infer_dir, scene_json):
 
     # 筛选出所有图片文件
     img_files = [f for f in os.listdir(infer_dir) if f.lower().endswith(valid_exts)]
-    print(f"📂 共找到 {len(img_files)} 张测试图片，开始推理...")
 
     with torch.no_grad():
-        for img_name in tqdm(img_files, desc="scene predict"):
+        for img_name in tqdm(img_files, desc="[scene] infer"):
             img_path = os.path.join(infer_dir, img_name)
 
             try:
@@ -246,17 +236,11 @@ def batch_predict_and_save(model_path, infer_dir, scene_json):
                 print(f"⚠️ 处理图片 {img_name} 时发生错误: {e}")
 
     # 4. 保存为 JSON 文件
-    print(f"\n💾 正在保存结果至 {scene_json}...")
+
     with open(scene_json, "w", encoding="utf-8") as f:
         # indent=4 可以让生成的 JSON 文件有良好的缩进，方便人类阅读
         json.dump(predictions_dict, f, indent=4)
-
-    print("✨ 批量预测完成！")
-
-    # 打印前 5 个预览一下
-    preview = {k: predictions_dict[k] for k in list(predictions_dict.keys())[:5]}
-    print(f"💡 文件内容预览: \n{json.dumps(preview, indent=4)}")
-
+    print(f"[scene] save to {scene_json}...")
     return predictions_dict
 
 

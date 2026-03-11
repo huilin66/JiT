@@ -5,7 +5,7 @@ from datetime import datetime
 
 import numpy as np
 import torch
-import torchvision.transforms as T
+
 from PIL import Image
 from tqdm import tqdm
 
@@ -140,11 +140,14 @@ def batch_predict(
 
     data_root = r"/scrinvme/huilin/bdd/cp_data/raindrop_remove_2026"
     ckpt_path = f"{data_root}/output/{weight_name}/16/checkpoint-{select_name}.pth"
-    input_dir = f"{data_root}/RainDrop_Test/Drop"
+    input_dir = f"{data_root}/RainDrop_Val/Drop/00000"
+    # input_dir = f"{data_root}/RainDrop_Test/Drop"
 
     time_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-    save_dir = f"{data_root}/submission_test/{weight_name}_step{step_num}_{select_name}_{use_scene_dataset}"
-    final_zip_name = f"{data_root}/submission_test/{time_str}.zip"
+    # save_dir = f"{data_root}/submission_test/{weight_name}_step{step_num}_{select_name}_{use_scene_dataset}"
+    # final_zip_name = f"{data_root}/submission_test/{time_str}.zip"
+    save_dir = f"{data_root}/submission_val/{weight_name}_step{step_num}_{select_name}_{use_scene_dataset}"
+    final_zip_name = f"{data_root}/submission_val/{time_str}.zip"
     scene_model_path = "scene_classifier_resnet18.pth"
     csv_file_path = "readme.txt"
     os.makedirs(save_dir, exist_ok=True)
@@ -216,15 +219,13 @@ if __name__ == "__main__":
     ]
     use_scene_dataset = [
         False,
-        True,
-        True,
         False,
+        True,
+        True,
     ]
     select_name = ["last", "best"]
 
     for i in range(len(weight_names)):
-        if i == 0:
-            continue
         batch_predict(
             weight_names[i],
             select_name[0],
