@@ -18,6 +18,8 @@ from dataset import (
     PairedRainDataset,
     ScenePairedRainDataset,
     SceneValPatchDataset,
+    ScenePairedRainDatasetV2,
+    SceneValPatchDatasetV2,
     ValPatchDataset,
 )
 from denoiser import Denoiser
@@ -250,8 +252,8 @@ def main(args):
             transform=transform_train,
         )
     else:
-        print("[DATASET] use ScenePairedRainDataset")
-        dataset_train = ScenePairedRainDataset(
+        print("[DATASET] use ScenePairedRainDatasetV2")
+        dataset_train = ScenePairedRainDatasetV2(
             rain_dir=os.path.join(args.data_path, "Drop"),
             clean_dir=os.path.join(args.data_path, "Clear"),
             transform=transform_train,
@@ -276,8 +278,8 @@ def main(args):
             clean_dir=os.path.join(args.data_path, "Clear"),
         )
     else:
-        print("[DATASET] use SceneValPatchDataset")
-        dataset_val_full = SceneValPatchDataset(
+        print("[DATASET] use SceneValPatchDatasetV2")
+        dataset_val_full = SceneValPatchDatasetV2(
             rain_dir=os.path.join(args.data_path, "Drop"),
             clean_dir=os.path.join(args.data_path, "Clear"),
         )

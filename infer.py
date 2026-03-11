@@ -141,7 +141,8 @@ def batch_predict(
     data_root = r"/scrinvme/huilin/bdd/cp_data/raindrop_remove_2026"
     ckpt_path = f"{data_root}/output/{weight_name}/16/checkpoint-{select_name}.pth"
     input_dir = f"{data_root}/RainDrop_Val/Drop/00000"
-    # input_dir = f"{data_root}/RainDrop_Test/Drop"
+    # input_dir = f"{data_root}/RainDrop_Test/Dro
+    # p"
 
     time_str = datetime.now().strftime("%Y%m%d_%H%M%S")
     # save_dir = f"{data_root}/submission_test/{weight_name}_step{step_num}_{select_name}_{use_scene_dataset}"

@@ -126,7 +126,6 @@ class ScenePairedRainDatasetV2(Dataset):
         clean_img = Image.open(clean_path).convert("RGB")
 
         rain_img, clean_img = self.transform(rain_img, clean_img)
-
         class_id = int(self.scene_info.get(img_name))
         dummy_labels = torch.zeros(1, dtype=torch.long) + class_id
         return rain_img, clean_img, dummy_labels

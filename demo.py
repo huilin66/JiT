@@ -1,7 +1,13 @@
+import json
 import os
 
-rain_dir = r"/scrinvme/huilin/bdd/cp_data/raindrop_remove_2026/RainDrop_Train/Drop"
-rain_dir2 = r"/scrinvme/huilin/bdd/cp_data/raindrop_remove_2026/RainDrop_Train2/Drop"
+from tqdm import tqdm
 
-print(len(os.listdir(rain_dir)))
-print(len(os.listdir(rain_dir2)))
+with open("/scrinvme/huilin/bdd/cp_data/raindrop_remove_2026/RainDrop_Train2/Drop_scen_pred.json", "r") as f:
+    scene_info = json.load(f)
+
+file_list = os.listdir(r'/scrinvme/huilin/bdd/cp_data/raindrop_remove_2026/RainDrop_Train2/Drop')
+
+for file in tqdm(file_list):
+    if file=='Day_00051_00054.png':
+        print(file)
