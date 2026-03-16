@@ -5,7 +5,6 @@ from datetime import datetime
 
 import numpy as np
 import torch
-
 from PIL import Image
 from tqdm import tqdm
 
@@ -137,18 +136,17 @@ def batch_predict(
     print(
         f"load {weight_name}/{select_name}, pred scene{use_scene_dataset}, device: {device} ..."
     )
-
+    image_batch_size = 6
     data_root = r"/scrinvme/huilin/bdd/cp_data/raindrop_remove_2026"
     ckpt_path = f"{data_root}/output/{weight_name}/16/checkpoint-{select_name}.pth"
-    input_dir = f"{data_root}/RainDrop_Val/Drop/00000"
-    # input_dir = f"{data_root}/RainDrop_Test/Dro
-    # p"
+    # input_dir = f"{data_root}/RainDrop_Val/Drop/00000"
+    input_dir = f"/scrinvme/huilin/bdd/cp_data/raindrop_remove_2026/test-input"
 
     time_str = datetime.now().strftime("%Y%m%d_%H%M%S")
     # save_dir = f"{data_root}/submission_test/{weight_name}_step{step_num}_{select_name}_{use_scene_dataset}"
     # final_zip_name = f"{data_root}/submission_test/{time_str}.zip"
-    save_dir = f"{data_root}/submission_val/{weight_name}_step{step_num}_{select_name}_{use_scene_dataset}"
-    final_zip_name = f"{data_root}/submission_val/{time_str}.zip"
+    save_dir = f"{data_root}/submission_test-input/{weight_name}_step{step_num}_{select_name}_{use_scene_dataset}"
+    final_zip_name = f"{data_root}/submission_test-input/{time_str}.zip"
     scene_model_path = "scene_classifier_resnet18.pth"
     csv_file_path = "readme.txt"
     os.makedirs(save_dir, exist_ok=True)
@@ -164,6 +162,7 @@ def batch_predict(
 
     args = get_args_parser().parse_args()
     args.use_bg_subnet = use_bg_subnet
+    args.model = 'JiT-H/16'
     model = Denoiser(args)
     checkpoint = torch.load(ckpt_path, map_location="cpu")
 
@@ -180,26 +179,71 @@ def batch_predict(
 
     files = [f for f in os.listdir(input_dir) if f.endswith((".jpg", ".png", ".jpeg"))]
 
-    for img_name in tqdm(files, desc="predict"):
-        img_path = os.path.join(input_dir, img_name)
-        input_data = img_process(img_path)
+    # for img_name in tqdm(files, desc="predict"):
+    #     img_path = os.path.join(input_dir, img_name)
+    #     input_data = img_process(img_path)
 
-        x = input_data["img"].to(device).to(torch.float32).div_(255.0)
-        x = x * 2.0 - 1.0
+    #     x = input_data["img"].to(device).to(torch.float32).div_(255.0)
+    #     x = x * 2.0 - 1.0
+    #     if use_scene_dataset:
+    #         scene_id = scene_dict[img_name]
+    #         dummy_labels = (
+    #             torch.zeros(x.shape[0], dtype=torch.long, device=x.device) + scene_id
+    #         )
+    #     else:
+    #         dummy_labels = None
+    #     with torch.no_grad():
+    #         output_tensor = model.generate_i2i(
+    #             x, steps=step_num, dummy_labels=dummy_labels
+    #         )
+
+    #     result_process(output_tensor, input_data, save_dir)
+    # === 将以下代码替换你原本的 for 循环 ===
+
+    # 根据你的 80G 显存，你可以将这个值调大。
+    # 如果 1 张图占 5G，理论上这里可以设为 8 甚至 12，请逐步调大测试直到占满显存。
+
+    for i in tqdm(range(0, len(files), image_batch_size), desc="Mega-Batch Predict"):
+        batch_files = files[i : i + image_batch_size]
+
+        batch_input_data = []
+        batch_x = []
+        batch_labels = []
+
+        # 1. 在 CPU 上收集多张图的所有 patches
+        for img_name in batch_files:
+            img_path = os.path.join(input_dir, img_name)
+            input_data = img_process(img_path)
+            batch_input_data.append(input_data)
+
+            x = input_data["img"].to(torch.float32).div_(255.0) * 2.0 - 1.0
+            batch_x.append(x)
+
+            if use_scene_dataset:
+                scene_id = scene_dict[img_name]
+                dummy_labels = torch.zeros(x.shape[0], dtype=torch.long) + scene_id
+                batch_labels.append(dummy_labels)
+
+        # 2. 将多张图的 patches 拼成一个巨大的 Tensor (例如 [800, 3, 256, 256])
+        mega_x = torch.cat(batch_x, dim=0).to(device)
         if use_scene_dataset:
-            scene_id = scene_dict[img_name]
-            dummy_labels = (
-                torch.zeros(x.shape[0], dtype=torch.long, device=x.device) + scene_id
-            )
+            mega_labels = torch.cat(batch_labels, dim=0).to(device)
         else:
-            dummy_labels = None
+            mega_labels = None
+
+        # 3. A100 火力全开：一次性无损 FP32 推理这个超级 Batch
         with torch.no_grad():
-            output_tensor = model.generate_i2i(
-                x, steps=step_num, dummy_labels=dummy_labels
+            mega_output = model.generate_i2i(
+                mega_x, steps=step_num, dummy_labels=mega_labels
             )
 
-        result_process(output_tensor, input_data, save_dir)
+        # 4. 将预测结果按原图的 patch 数量切分回去
+        split_sizes = [x.shape[0] for x in batch_x]
+        output_tensors = torch.split(mega_output, split_sizes, dim=0)
 
+        # 5. 分别进行 Hanning Window 融合并保存
+        for out_tensor, in_data in zip(output_tensors, batch_input_data):
+            result_process(out_tensor, in_data, save_dir)
     print(f"result save to {save_dir}")
 
     zip_results(result_dir=save_dir, csv_path=csv_file_path, zip_path=final_zip_name)
@@ -207,21 +251,19 @@ def batch_predict(
 
 if __name__ == "__main__":
     weight_names = [
-        "JiT-B-raindrop01",
-        "JiT-B-raindrop03",
-        "JiT-B-raindrop01",
-        "JiT-B-raindrop03",
+        # "JiT-B-raindrop13",
+        # "JiT-B-raindrop13",
+        "JiT-H-raindrop24",
+        "JiT-H-raindrop24",
     ]
     use_bg_subnet_list = [
-        False,
         True,
-        False,
         True,
+        # False,
+        # False,
     ]
     use_scene_dataset = [
         False,
-        False,
-        True,
         True,
     ]
     select_name = ["last", "best"]
@@ -230,12 +272,6 @@ if __name__ == "__main__":
         batch_predict(
             weight_names[i],
             select_name[0],
-            use_bg_subnet=use_bg_subnet_list[i],
-            use_scene_dataset=use_scene_dataset[i],
-        )
-        batch_predict(
-            weight_names[i],
-            select_name[1],
             use_bg_subnet=use_bg_subnet_list[i],
             use_scene_dataset=use_scene_dataset[i],
         )

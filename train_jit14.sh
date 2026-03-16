@@ -1,7 +1,7 @@
 IMAGENET_PATH=/scrinvme/huilin/bdd/cp_data/raindrop_remove_2026/RainDrop_Train2
 CKPT=/scrinvme/huilin/bdd/cp_data/raindrop_remove_2026/jit-b-16
 
-OUTPUT_DIR=/scrinvme/huilin/bdd/cp_data/raindrop_remove_2026/output/JiT-B-raindrop13/16
+OUTPUT_DIR=/scrinvme/huilin/bdd/cp_data/raindrop_remove_2026/output/JiT-B-raindrop14/16
 
 CUDA_VISIBLE_DEVICES=1 torchrun --nproc_per_node=1 --master_port=29514 main_jit.py \
 --model JiT-B/16 \

@@ -420,38 +420,38 @@ def main(args):
                 optimizer=optimizer,
                 epoch=epoch,
             )
-        if epoch % args.eval_epoch == 0 or epoch + 1 == args.epochs:
-            total_scores = evaluate_best_metric(
-                model_without_ddp, data_loader_val, device
-            )
-            print(
-                f"Epoch [{epoch}] - "
-                f"score: {total_scores['score']:.4f}, "
-                f"psnr: {total_scores['psnr']:.4f}, "
-                f"ssim: {total_scores['ssim']:.4f}, "
-                f"lpips: {total_scores['lpips']:.4f}"
-            )
-
-            if log_writer is not None:
-                log_writer.add_scalar(
-                    "val_composite_score", total_scores["score"], epoch
-                )
-                log_writer.add_scalar("val_composite_psnr", total_scores["psnr"], epoch)
-                log_writer.add_scalar("val_composite_ssim", total_scores["ssim"], epoch)
-                log_writer.add_scalar(
-                    "val_composite_lpips", total_scores["lpips"], epoch
-                )
-
-            if total_scores["score"] > best_score:
-                best_score = total_scores["score"]
-                print(f"New Best score: {best_score:.4f}, saving...")
-                misc.save_model(
-                    args=args,
-                    model_without_ddp=model_without_ddp,
-                    optimizer=optimizer,
-                    epoch=epoch,
-                    epoch_name="best",
-                )
+        # if epoch % args.eval_epoch == 0 or epoch + 1 == args.epochs:
+        #     total_scores = evaluate_best_metric(
+        #         model_without_ddp, data_loader_val, device
+        #     )
+        #     print(
+        #         f"Epoch [{epoch}] - "
+        #         f"score: {total_scores['score']:.4f}, "
+        #         f"psnr: {total_scores['psnr']:.4f}, "
+        #         f"ssim: {total_scores['ssim']:.4f}, "
+        #         f"lpips: {total_scores['lpips']:.4f}"
+        #     )
+        #
+        #     if log_writer is not None:
+        #         log_writer.add_scalar(
+        #             "val_composite_score", total_scores["score"], epoch
+        #         )
+        #         log_writer.add_scalar("val_composite_psnr", total_scores["psnr"], epoch)
+        #         log_writer.add_scalar("val_composite_ssim", total_scores["ssim"], epoch)
+        #         log_writer.add_scalar(
+        #             "val_composite_lpips", total_scores["lpips"], epoch
+        #         )
+        #
+        #     if total_scores["score"] > best_score:
+        #         best_score = total_scores["score"]
+        #         print(f"New Best score: {best_score:.4f}, saving...")
+        #         misc.save_model(
+        #             args=args,
+        #             model_without_ddp=model_without_ddp,
+        #             optimizer=optimizer,
+        #             epoch=epoch,
+        #             epoch_name="best",
+        #         )
 
         if misc.is_main_process() and log_writer is not None:
             log_writer.flush()
