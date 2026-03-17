@@ -10,5 +10,5 @@ CUDA_VISIBLE_DEVICES=0,1 torchrun --nproc_per_node=2 --master_port=29524 main_ji
 --batch_size 12 --lr 5e-5 --lr_schedule cosine \
 --epochs 600 --warmup_epochs 5 --eval_epoch 100 \
 --eval_num_images 100 --cfg 1.0 \
---output_dir ${OUTPUT_DIR} --use_bg_subnet 1 --use_scene_dataset 1 \
+--output_dir ${OUTPUT_DIR} --use_bg_subnet 0 --use_scene_dataset 1 \
 --data_path ${IMAGENET_PATH} --resume ${CKPT}
