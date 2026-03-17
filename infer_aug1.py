@@ -475,4 +475,5 @@ if __name__ == "__main__":
             scales=[0.8, 1.0, 1.25],
             use_h_flip=True,
             use_color_match=True,
+            step_num=1,
         )

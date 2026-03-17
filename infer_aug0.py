@@ -378,7 +378,7 @@ def batch_predict(
 
     args = get_args_parser().parse_args()
     args.use_bg_subnet = use_bg_subnet
-    args.model = "JiT-H/16"
+    # args.model = "JiT-H/16"
     model = Denoiser(args)
     checkpoint = torch.load(ckpt_path, map_location="cpu")
 
@@ -442,19 +442,19 @@ def batch_predict(
 
 if __name__ == "__main__":
     weight_names = [
-        # "JiT-B-raindrop13",
-        # "JiT-B-raindrop13",
+        "JiT-B-raindrop13",
+        "JiT-B-raindrop13",
         # "JiT-H-raindrop24",
-        "JiT-H-raindrop22",
+        # "JiT-H-raindrop22",
     ]
     use_bg_subnet_list = [
-        # True,
-        # True,
-        False,
+        True,
+        True,
+        # False,
         # False,
     ]
     use_scene_dataset = [
-        # False,
+        False,
         True,
     ]
     select_name = ["last", "best"]
@@ -465,12 +465,13 @@ if __name__ == "__main__":
             select_name[0],
             use_bg_subnet=use_bg_subnet_list[i],
             use_scene_dataset=use_scene_dataset[i],
-            use_h_flip=True,
+            step_num=1,
+            device=0
         )
-        batch_predict(
-            weight_names[i],
-            select_name[0],
-            use_bg_subnet=use_bg_subnet_list[i],
-            use_scene_dataset=use_scene_dataset[i],
-            use_color_match=True,
-        )
+        # batch_predict(
+        #     weight_names[i],
+        #     select_name[0],
+        #     use_bg_subnet=use_bg_subnet_list[i],
+        #     use_scene_dataset=use_scene_dataset[i],
+        #     use_color_match=True,
+        # )
