@@ -174,7 +174,7 @@ def get_args_parser():
     # dataset
     parser.add_argument(
         "--data_path",
-        default=r"/scrinvme/huilin/bdd/cp_data/raindrop_remove_2026/RainDrop_Train",
+        default=r"/scrinvme/huilin/bdd/cp_data/raindrop_remove_2026/RainDrop_Train2",
         type=str,
         help="Path to the dataset",
     )

@@ -1,0 +1,9 @@
+output/
+output_dir/
+.idea/
+__pycache__/
+
+*.pth
+*.csv
+*.json
+*.pyc

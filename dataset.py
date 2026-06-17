@@ -325,7 +325,9 @@ class SceneValPatchDatasetV2(Dataset):
         rain_tensor = torch.stack(rain_patches, dim=0)
         clean_tensor = torch.stack(clean_patches, dim=0)
 
-        class_id = int(self.scene_info.get(img_name))
+        scene_id = self.scene_info.get(img_name)
+        # print(f'{img_name}, {scene_id}')
+        class_id = int(scene_id)
         dummy_labels = torch.zeros(rain_tensor.shape[0], dtype=torch.long) + class_id
         return rain_tensor, clean_tensor, dummy_labels
 
