@@ -1,90 +1,131 @@
+import argparse
 import csv
+import json
 import os
 import shutil
+from pathlib import Path
 
 import cv2
 import numpy as np
-from tqdm import tqdm
-import os
-import shutil
-
-from tqdm import tqdm
-import os
-
 import pandas as pd
+from tqdm import tqdm
+
+
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp"}
+
+
+def is_image(path):
+    return Path(path).suffix.lower() in IMAGE_EXTENSIONS
+
+
+def list_images(root, recursive=False):
+    root = Path(root)
+    iterator = root.rglob("*") if recursive else root.iterdir()
+    return sorted(p for p in iterator if p.is_file() and is_image(p))
+
+
+def ensure_dir(path):
+    Path(path).mkdir(parents=True, exist_ok=True)
+
+
+def infer_day_from_name(img_name):
+    lower = img_name.lower()
+    if lower.startswith("day_") or lower.startswith("d_"):
+        return True
+    if lower.startswith("night_") or lower.startswith("n_"):
+        return False
+    return None
+
+
+def class_id_from_flags(is_day, is_bg_focus):
+    # 0: night background-focus
+    # 1: night raindrop-focus
+    # 2: day background-focus
+    # 3: day raindrop-focus
+    if not is_day and is_bg_focus:
+        return 0
+    if not is_day and not is_bg_focus:
+        return 1
+    if is_day and is_bg_focus:
+        return 2
+    return 3
 
 
 def analyze_image(img_path):
-    """提取图像的亮度和清晰度特征"""
-    # 1. 读取图像并转为灰度图
-    img = cv2.imread(img_path)
+    img = cv2.imread(str(img_path), cv2.IMREAD_COLOR)
     if img is None:
-        return None, None
+        return None
 
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-
-    # 2. 计算平均亮度 (Day vs Night)
-    mean_intensity = np.mean(gray)
-
-    # 3. 计算拉普拉斯方差 (Focus Background vs Raindrop)
-    # 返回值越大，代表图像整体越锐利/边缘越多 (对焦在背景)
-    # 返回值越小，代表图像整体越模糊/平滑 (对焦在雨滴，背景虚化)
-    laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
-
+    mean_intensity = float(np.mean(gray))
+    laplacian_var = float(cv2.Laplacian(gray, cv2.CV_64F).var())
     return mean_intensity, laplacian_var
 
 
-def generate_pseudo_labels(
-    rain_dir, output_csv, INTENSITY_THRESH=80.0, LAPLACIAN_THRESH=500.0
+def predict_scene_by_heuristics(
+    img_path,
+    intensity_thresh=100.0,
+    laplacian_thresh=500.0,
+    prefer_name_day=True,
 ):
-    # ================= 配置区 =================
-    # 只需要对带雨图 (Drop) 目录进行特征提取即可
+    stats = analyze_image(img_path)
+    if stats is None:
+        return None
 
-    files = [f for f in os.listdir(rain_dir) if f.endswith((".png", ".jpg", ".jpeg"))]
-    print(f"🚀 开始分析 {len(files)} 张图像的物理特征...")
+    mean_intensity, laplacian_var = stats
+    name_day = infer_day_from_name(Path(img_path).name) if prefer_name_day else None
+    is_day = name_day if name_day is not None else mean_intensity > intensity_thresh
+    is_bg_focus = laplacian_var > laplacian_thresh
+    class_id = class_id_from_flags(is_day, is_bg_focus)
+    return {
+        "filename": Path(img_path).name,
+        "mean_intensity": round(mean_intensity, 4),
+        "laplacian_var": round(laplacian_var, 4),
+        "is_day": int(is_day),
+        "is_bg_focus": int(is_bg_focus),
+        "class_id": int(class_id),
+    }
 
-    results = []
 
-    for img_name in tqdm(files):
-        img_path = os.path.join(rain_dir, img_name)
-        mean_int, lap_var = analyze_image(img_path)
+def generate_scene_pseudo_labels(
+    drop_dir,
+    output_json,
+    output_csv=None,
+    intensity_thresh=100.0,
+    laplacian_thresh=500.0,
+    prefer_name_day=True,
+):
+    drop_dir = Path(drop_dir)
+    output_json = Path(output_json)
+    output_csv = Path(output_csv) if output_csv else output_json.with_suffix(".csv")
+    ensure_dir(output_json.parent)
+    ensure_dir(output_csv.parent)
 
-        if mean_int is None:
-            print(f"⚠️ 警告: 无法读取图像 {img_name}")
-            continue
+    files = list_images(drop_dir, recursive=False)
+    if not files:
+        raise RuntimeError(f"No images found in Drop directory: {drop_dir}")
 
-        # 逻辑判断
-        is_day = mean_int > INTENSITY_THRESH
-        is_bg_focus = lap_var > LAPLACIAN_THRESH
+    rows = []
+    scene_dict = {}
+    failed = []
 
-        # 标签映射
-        # 0: night_bg_focus
-        # 1: night_raindrop_focus
-        # 2: day_bg_focus
-        # 3: day_raindrop_focus
-        if not is_day and is_bg_focus:
-            label = 0
-        elif not is_day and not is_bg_focus:
-            label = 1
-        elif is_day and is_bg_focus:
-            label = 2
-        else:  # is_day and not is_bg_focus
-            label = 3
-
-        results.append(
-            {
-                "filename": img_name,
-                "mean_intensity": round(mean_int, 2),
-                "laplacian_var": round(lap_var, 2),
-                "is_day": int(is_day),
-                "is_bg_focus": int(is_bg_focus),
-                "label": label,
-            }
+    for img_path in tqdm(files, desc="Generate scene pseudo labels"):
+        row = predict_scene_by_heuristics(
+            img_path,
+            intensity_thresh=intensity_thresh,
+            laplacian_thresh=laplacian_thresh,
+            prefer_name_day=prefer_name_day,
         )
+        if row is None:
+            failed.append(img_path.name)
+            continue
+        rows.append(row)
+        scene_dict[row["filename"]] = row["class_id"]
 
-    # 将结果写入 CSV
-    print(f"\n💾 正在保存结果至 {output_csv}...")
-    with open(output_csv, mode="w", newline="", encoding="utf-8") as f:
+    with open(output_json, "w", encoding="utf-8") as f:
+        json.dump(scene_dict, f, indent=2, sort_keys=True)
+
+    with open(output_csv, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(
             f,
             fieldnames=[
@@ -93,209 +134,260 @@ def generate_pseudo_labels(
                 "laplacian_var",
                 "is_day",
                 "is_bg_focus",
-                "label",
+                "class_id",
             ],
         )
         writer.writeheader()
-        writer.writerows(results)
+        writer.writerows(rows)
 
-    print("✨ 自动标注完成！")
+    counts = {i: 0 for i in range(4)}
+    for class_id in scene_dict.values():
+        counts[int(class_id)] += 1
+
+    print(f"Saved scene json: {output_json}")
+    print(f"Saved scene stats csv: {output_csv}")
+    print("Class counts:", counts)
+    if failed:
+        print(f"Warning: failed to read {len(failed)} images. First failed: {failed[0]}")
+    return scene_dict
 
 
-def copy_data(
-    src_dir,
-    dst_dir,
-    drop_dir_name,
-    clear_dir_name,
-    type="Day",
-):
-    """
-    Copy data from src_dir to dst_dir.
-    """
-    dst_dir_drop = os.path.join(dst_dir, drop_dir_name)
-    dst_dir_clear = os.path.join(dst_dir, clear_dir_name)
-    os.makedirs(dst_dir_drop, exist_ok=True)
-    os.makedirs(dst_dir_clear, exist_ok=True)
+def copy_data(src_dir, dst_dir, drop_dir_name="Drop", clear_dir_name="Clear", type_name="Day"):
+    dst_dir = Path(dst_dir)
+    dst_dir_drop = dst_dir / drop_dir_name
+    dst_dir_clear = dst_dir / clear_dir_name
+    ensure_dir(dst_dir_drop)
+    ensure_dir(dst_dir_clear)
 
-    src_dir_drop = os.path.join(src_dir, drop_dir_name)
-    src_dir_clear = os.path.join(src_dir, clear_dir_name)
+    src_dir = Path(src_dir)
+    src_dir_drop = src_dir / drop_dir_name
+    src_dir_clear = src_dir / clear_dir_name
 
-    src_drop_list = os.listdir(src_dir_drop)
-    for sub_id_name in tqdm(src_drop_list, desc=f"Copy {type} Drop Data"):
-        src_id_path = os.path.join(src_dir_drop, sub_id_name)
-        for file_name in os.listdir(src_id_path):
-            src_file_path = os.path.join(src_id_path, file_name)
-            dst_file_path = os.path.join(
-                dst_dir_drop, f"{type}_{sub_id_name}_{file_name}"
-            )
-            shutil.copy(src_file_path, dst_file_path)
+    if not src_dir_drop.exists() or not src_dir_clear.exists():
+        raise RuntimeError(f"Expected {src_dir_drop} and {src_dir_clear} to exist.")
 
-    src_clear_list = os.listdir(src_dir_clear)
-    for sub_id_name in tqdm(src_clear_list, desc=f"Copy {type} Clear Data"):
-        src_id_path = os.path.join(src_dir_clear, sub_id_name)
-        for file_name in os.listdir(src_id_path):
-            src_file_path = os.path.join(src_id_path, file_name)
-            dst_file_path = os.path.join(
-                dst_dir_clear, f"{type}_{sub_id_name}_{file_name}"
-            )
-            shutil.copy(src_file_path, dst_file_path)
+    for src_root, dst_root, desc in [
+        (src_dir_drop, dst_dir_drop, f"Copy {type_name} Drop"),
+        (src_dir_clear, dst_dir_clear, f"Copy {type_name} Clear"),
+    ]:
+        sub_dirs = sorted(p for p in src_root.iterdir() if p.is_dir())
+        for sub_dir in tqdm(sub_dirs, desc=desc):
+            for src_file in list_images(sub_dir, recursive=False):
+                dst_file = dst_root / f"{type_name}_{sub_dir.name}_{src_file.name}"
+                shutil.copy2(src_file, dst_file)
+
+
+def copy_day_night(day_root, night_root, dst_root, drop_dir_name="Drop", clear_dir_name="Clear"):
+    if day_root:
+        copy_data(day_root, dst_root, drop_dir_name, clear_dir_name, type_name="Day")
+    if night_root:
+        copy_data(night_root, dst_root, drop_dir_name, clear_dir_name, type_name="Night")
+
+
+def check_trainable_folder(data_root, scene_json=None, drop_dir_name="Drop", clear_dir_name="Clear"):
+    data_root = Path(data_root)
+    drop_dir = data_root / drop_dir_name
+    clear_dir = data_root / clear_dir_name
+    if not drop_dir.exists():
+        raise RuntimeError(f"Missing Drop directory: {drop_dir}")
+    if not clear_dir.exists():
+        raise RuntimeError(f"Missing Clear directory: {clear_dir}")
+
+    drop_files = {p.name for p in list_images(drop_dir, recursive=False)}
+    clear_files = {p.name for p in list_images(clear_dir, recursive=False)}
+    missing_clear = sorted(drop_files - clear_files)
+    missing_drop = sorted(clear_files - drop_files)
+
+    print(f"Drop images: {len(drop_files)}")
+    print(f"Clear images: {len(clear_files)}")
+    print(f"Missing Clear pairs: {len(missing_clear)}")
+    print(f"Missing Drop pairs: {len(missing_drop)}")
+    if missing_clear:
+        print(f"First missing Clear: {missing_clear[0]}")
+    if missing_drop:
+        print(f"First missing Drop: {missing_drop[0]}")
+
+    scene_json = Path(scene_json) if scene_json else data_root / "Drop_scen_pred.json"
+    if scene_json.exists():
+        with open(scene_json, "r", encoding="utf-8") as f:
+            scene_dict = json.load(f)
+        missing_scene = sorted(drop_files - set(scene_dict.keys()))
+        extra_scene = sorted(set(scene_dict.keys()) - drop_files)
+        counts = {i: 0 for i in range(4)}
+        for value in scene_dict.values():
+            if int(value) in counts:
+                counts[int(value)] += 1
+        print(f"Scene json: {scene_json}")
+        print(f"Scene labels: {len(scene_dict)}")
+        print(f"Missing scene labels: {len(missing_scene)}")
+        print(f"Extra scene labels: {len(extra_scene)}")
+        print("Scene class counts:", counts)
+        if missing_scene:
+            print(f"First missing scene label: {missing_scene[0]}")
+    else:
+        print(f"Scene json not found: {scene_json}")
 
 
 def count_dataset_images(base_dir):
+    base_dir = Path(base_dir)
     total_images = 0
     folder_counts = {}
 
-    # 支持的常见图像格式
-    valid_extensions = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")
-
-    print(f"📁 开始统计目录: {base_dir}")
-    print("-" * 35)
-    print(f"{'文件夹名称':<15} | {'图片数量'}")
-    print("-" * 35)
-
-    # 遍历 Drop 目录下的所有子文件夹，并按名称排序
-    for folder_name in sorted(os.listdir(base_dir)):
-        folder_path = os.path.join(base_dir, folder_name)
-
-        # 确保它是一个文件夹
-        if os.path.isdir(folder_path):
-            # 统计该文件夹下的图像文件数量
-            images = [
-                f
-                for f in os.listdir(folder_path)
-                if f.lower().endswith(valid_extensions)
-            ]
-            count = len(images)
-            folder_counts[folder_name] = count
-            total_images += count
-
-            print(f"{folder_name:<15} | {count}")
+    for folder in sorted(p for p in base_dir.iterdir() if p.is_dir()):
+        count = len(list_images(folder, recursive=False))
+        folder_counts[folder.name] = count
+        total_images += count
+        print(f"{folder.name:<20} | {count}")
 
     print("-" * 35)
-    print(f"🎯 统计完成！")
-    print(f"📂 总文件夹数: {len(folder_counts)}")
-    print(f"🖼️ 总图片总数: {total_images}")
-
-
-
+    print(f"Folders: {len(folder_counts)}")
+    print(f"Images: {total_images}")
 
 
 def extract_sample_images(source_dir, dest_dir):
+    source_dir = Path(source_dir)
+    dest_dir = Path(dest_dir)
+    ensure_dir(dest_dir)
 
-    if not os.path.exists(dest_dir):
-        os.makedirs(dest_dir)
-        print(f"📂 创建了用于肉眼审查的文件夹: {dest_dir}")
-
-    # 获取所有子文件夹 (例如 '00166', '00167')
-    folders = [
-        f for f in os.listdir(source_dir) if os.path.isdir(os.path.join(source_dir, f))
-    ]
-    folders.sort()  # 按文件夹名字典序排好
-
-    valid_exts = (".png", ".jpg", ".jpeg", ".bmp")
     count = 0
-
-    print(f"🚀 开始从 {len(folders)} 个文件夹中抽样图片...")
-
-    for folder_name in tqdm(folders):
-        folder_path = os.path.join(source_dir, folder_name)
-
-        # 找出该文件夹下的所有图片
-        files = [f for f in os.listdir(folder_path) if f.lower().endswith(valid_exts)]
-
+    folders = sorted(p for p in source_dir.iterdir() if p.is_dir())
+    for folder in tqdm(folders, desc="Extract sample images"):
+        files = list_images(folder, recursive=False)
         if not files:
-            print(f"⚠️ 警告: 文件夹 {folder_name} 是空的，已跳过。")
             continue
-
-        # 排序后，取该文件夹里的第一张图片作为代表
-        files.sort()
-        sample_file = files[0]
-        src_path = os.path.join(folder_path, sample_file)
-
-        # 获取原图的后缀名 (如 .png)
-        ext = os.path.splitext(sample_file)[1]
-
-        # 核心：重命名为 "文件夹名.后缀" (例如: 00166.png)
-        new_name = f"{folder_name}{ext}"
-        dest_path = os.path.join(dest_dir, new_name)
-
-        # 复制文件
-        shutil.copy2(src_path, dest_path)
+        src_path = files[0]
+        dst_path = dest_dir / f"{folder.name}{src_path.suffix}"
+        shutil.copy2(src_path, dst_path)
         count += 1
-
-    print(f"\n✨ 抽样完成！")
-    print(f"🎯 共成功提取了 {count} 张场景代表图。")
-    print(f"👉 请打开 {os.path.abspath(dest_dir)} 文件夹进行肉眼判断。")
+    print(f"Extracted {count} sample images to {dest_dir}")
 
 
+def convert_manual_labels(input_excel, output_csv):
+    input_excel = Path(input_excel)
+    output_csv = Path(output_csv)
+    if not input_excel.exists():
+        raise RuntimeError(f"Input file not found: {input_excel}")
 
-def convert_manual_labels(input_csv, output_csv):
-    if not os.path.exists(input_csv):
-        print(f"❌ 找不到输入文件: {input_csv}")
-        return
-
-    print(f"🚀 开始读取并转换人工标注数据: {input_csv} ...")
-    df = pd.read_excel(input_csv, sheet_name="Sheet1")
-
-    # 1. 自动把 id 补齐为 5 位数的文件夹名 (例如: 1 -> "00001")
-    # 这样才能和你实际的 Drop/00001 文件夹完美对应
+    df = pd.read_excel(input_excel, sheet_name="Sheet1")
     df["folder_name"] = df["id"].apply(lambda x: str(int(x)).zfill(5))
 
-    # 2. 定义映射函数
     def get_class_id(row):
-        day_night = str(row["type"]).strip().upper()  # 'D' 或 'N'
-        bg_focus = str(row["bg focus"]).strip()  # '0' 或 '1'
+        is_day = str(row["type"]).strip().upper() == "D"
+        is_bg_focus = str(row["bg focus"]).strip() == "1"
+        return class_id_from_flags(is_day, is_bg_focus)
 
-        is_day = day_night == "D"
-        is_bg_focus = bg_focus == "1"
-
-        # 0: 黑夜_背景聚焦 | 1: 黑夜_雨滴聚焦
-        # 2: 白天_背景聚焦 | 3: 白天_雨滴聚焦
-        if not is_day and is_bg_focus:
-            return 0
-        elif not is_day and not is_bg_focus:
-            return 1
-        elif is_day and is_bg_focus:
-            return 2
-        else:
-            return 3
-
-    # 3. 应用映射函数，生成新列 'class_id'
     df["class_id"] = df.apply(get_class_id, axis=1)
-
-    # 4. 只保留我们需要的两列，保存为最终的 CSV
-    final_df = df
-    final_df.to_csv(output_csv, index=False, encoding="utf-8")
-
-    print(f"\n✨ 转换成功！")
-    print(f"📊 类别统计结果如下：")
+    ensure_dir(output_csv.parent)
+    df.to_csv(output_csv, index=False, encoding="utf-8")
+    print(f"Saved manual label csv: {output_csv}")
     print(df["class_id"].value_counts().sort_index())
-    print(f"\n📁 最终文件已保存至: {os.path.abspath(output_csv)}")
-    print(f"💡 文件预览:\n{final_df.head()}")
+
+
+def build_parser():
+    parser = argparse.ArgumentParser("Raindrop data tools")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    copy_parser = subparsers.add_parser("copy", help="Merge Day/Night data into flat Drop/Clear folders")
+    copy_parser.add_argument("--day-root", default="", help="Root containing Day Drop/Clear folders")
+    copy_parser.add_argument("--night-root", default="", help="Root containing Night Drop/Clear folders")
+    copy_parser.add_argument("--dst-root", required=True, help="Output trainable data root")
+    copy_parser.add_argument("--drop-dir-name", default="Drop")
+    copy_parser.add_argument("--clear-dir-name", default="Clear")
+
+    pseudo_parser = subparsers.add_parser(
+        "pseudo-scene",
+        help="Generate Drop_scen_pred.json for ScenePairedRainDatasetV2",
+    )
+    pseudo_parser.add_argument("--data-root", default="", help="Root containing Drop/Clear folders")
+    pseudo_parser.add_argument("--drop-dir", default="", help="Drop directory. Overrides --data-root/Drop")
+    pseudo_parser.add_argument("--output-json", default="", help="Default: data-root/Drop_scen_pred.json")
+    pseudo_parser.add_argument("--output-csv", default="", help="Default: same path as json with .csv suffix")
+    pseudo_parser.add_argument("--intensity-thresh", type=float, default=100.0)
+    pseudo_parser.add_argument("--laplacian-thresh", type=float, default=500.0)
+    pseudo_parser.add_argument(
+        "--ignore-name-day",
+        action="store_true",
+        help="Infer day/night from brightness even if filename starts with Day/Night",
+    )
+
+    check_parser = subparsers.add_parser("check", help="Check Drop/Clear pairs and scene json coverage")
+    check_parser.add_argument("--data-root", required=True)
+    check_parser.add_argument("--scene-json", default="")
+    check_parser.add_argument("--drop-dir-name", default="Drop")
+    check_parser.add_argument("--clear-dir-name", default="Clear")
+
+    count_parser = subparsers.add_parser("count", help="Count images under subfolders")
+    count_parser.add_argument("--base-dir", required=True)
+
+    sample_parser = subparsers.add_parser("samples", help="Extract one sample image per subfolder")
+    sample_parser.add_argument("--source-dir", required=True)
+    sample_parser.add_argument("--dest-dir", required=True)
+
+    manual_parser = subparsers.add_parser("manual-labels", help="Convert manual Excel labels to csv")
+    manual_parser.add_argument("--input-excel", required=True)
+    manual_parser.add_argument("--output-csv", required=True)
+
+    return parser
+
+
+def main():
+    args = build_parser().parse_args()
+
+    if args.command == "copy":
+        copy_day_night(
+            day_root=args.day_root,
+            night_root=args.night_root,
+            dst_root=args.dst_root,
+            drop_dir_name=args.drop_dir_name,
+            clear_dir_name=args.clear_dir_name,
+        )
+        check_trainable_folder(args.dst_root, drop_dir_name=args.drop_dir_name, clear_dir_name=args.clear_dir_name)
+        return
+
+    if args.command == "pseudo-scene":
+        if args.drop_dir:
+            drop_dir = Path(args.drop_dir)
+            data_root = drop_dir.parent
+        elif args.data_root:
+            data_root = Path(args.data_root)
+            drop_dir = data_root / "Drop"
+        else:
+            raise RuntimeError("pseudo-scene needs --data-root or --drop-dir")
+
+        output_json = Path(args.output_json) if args.output_json else data_root / "Drop_scen_pred.json"
+        output_csv = Path(args.output_csv) if args.output_csv else output_json.with_suffix(".csv")
+        generate_scene_pseudo_labels(
+            drop_dir=drop_dir,
+            output_json=output_json,
+            output_csv=output_csv,
+            intensity_thresh=args.intensity_thresh,
+            laplacian_thresh=args.laplacian_thresh,
+            prefer_name_day=not args.ignore_name_day,
+        )
+        check_trainable_folder(data_root, scene_json=output_json)
+        return
+
+    if args.command == "check":
+        check_trainable_folder(
+            args.data_root,
+            scene_json=args.scene_json or None,
+            drop_dir_name=args.drop_dir_name,
+            clear_dir_name=args.clear_dir_name,
+        )
+        return
+
+    if args.command == "count":
+        count_dataset_images(args.base_dir)
+        return
+
+    if args.command == "samples":
+        extract_sample_images(args.source_dir, args.dest_dir)
+        return
+
+    if args.command == "manual-labels":
+        convert_manual_labels(args.input_excel, args.output_csv)
+        return
 
 
 if __name__ == "__main__":
-    pass
-
-    ROOT_DIR = r"/root/huilin/data/eccv_dn"
-    DATA_DAY = os.path.join(ROOT_DIR, "DayRainDrop_Train")
-    DATA_NIGHT = os.path.join(ROOT_DIR, "NightRainDrop_Train")
-    DATA_TRAIN = os.path.join(ROOT_DIR, "RainDrop_Train")
-
-    DROP_DIR_NAME = "Drop"
-    CLEAR_DIR_NAME = "Clear"
-
-    DATA_TRAIN_DROP = os.path.join(DATA_TRAIN, DROP_DIR_NAME)
-    SCENE_TRAIN_CSV = os.path.join(DATA_TRAIN, "train_scene.csv")
-
-    INTENSITY_THRESH = 100.0  # 大于80认为是白天，小于等于80认为是黑夜
-    LAPLACIAN_THRESH = 500.0  # 大于500认为是背景清晰(Focus BG)，小于等于500认为是背景虚化(Focus Raindrop)
-
-
-    copy_data(DATA_DAY, DATA_TRAIN, drop_dir_name=DROP_DIR_NAME, clear_dir_name=CLEAR_DIR_NAME, type="Day")
-    copy_data(DATA_NIGHT, DATA_TRAIN, drop_dir_name=DROP_DIR_NAME, clear_dir_name=CLEAR_DIR_NAME, type="Night")
-    
-    # used for mannual label check
-    # extract_sample_images(DATA_DAY, DATA_DAY + "_overall")
-    # extract_sample_images(DATA_NIGHT, DATA_NIGHT + "_overall")
-    generate_pseudo_labels(DATA_TRAIN_DROP, SCENE_TRAIN_CSV, INTENSITY_THRESH, LAPLACIAN_THRESH)
+    main()
