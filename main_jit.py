@@ -77,6 +77,18 @@ def get_args_parser():
     parser.add_argument(
         "--use_scene_dataset", type=int, default=0, help="use_scene_dataset"
     )
+    parser.add_argument(
+        "--scene_train_path",
+        default="",
+        type=str,
+        help="Path to scene labels for train set. Supports csv for V1 or json for V2 datasets.",
+    )
+    parser.add_argument(
+        "--scene_val_path",
+        default="",
+        type=str,
+        help="Path to scene labels for validation set. Defaults to scene_train_path.",
+    )
     parser.add_argument("--eval_epoch", type=int, default=5, help="eval_epoch")
     # training
     parser.add_argument("--epochs", default=600, type=int)
@@ -178,6 +190,12 @@ def get_args_parser():
         type=str,
         help="Path to the dataset",
     )
+    parser.add_argument(
+        "--val_data_path",
+        default="",
+        type=str,
+        help="Validation dataset path. Defaults to data_path.",
+    )
     parser.add_argument("--class_num", default=1000, type=int)
 
     # checkpointing
@@ -257,6 +275,7 @@ def main(args):
             rain_dir=os.path.join(args.data_path, "Drop"),
             clean_dir=os.path.join(args.data_path, "Clear"),
             transform=transform_train,
+            scene_path=args.scene_train_path or None,
         )
 
     sampler_train = torch.utils.data.DistributedSampler(
@@ -271,17 +290,19 @@ def main(args):
         drop_last=True,
     )
 
+    val_data_path = args.val_data_path or args.data_path
     if not args.use_scene_dataset:
         print("[DATASET] use ValPatchDataset")
         dataset_val_full = ValPatchDataset(
-            rain_dir=os.path.join(args.data_path, "Drop"),
-            clean_dir=os.path.join(args.data_path, "Clear"),
+            rain_dir=os.path.join(val_data_path, "Drop"),
+            clean_dir=os.path.join(val_data_path, "Clear"),
         )
     else:
         print("[DATASET] use SceneValPatchDatasetV2")
         dataset_val_full = SceneValPatchDatasetV2(
-            rain_dir=os.path.join(args.data_path, "Drop"),
-            clean_dir=os.path.join(args.data_path, "Clear"),
+            rain_dir=os.path.join(val_data_path, "Drop"),
+            clean_dir=os.path.join(val_data_path, "Clear"),
+            scene_path=args.scene_val_path or args.scene_train_path or None,
         )
 
     num_val_images = min(args.eval_num_images, len(dataset_val_full))
@@ -305,11 +326,7 @@ def main(args):
     model = Denoiser(args)
 
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(
-        f"[MODEL] {model}, number of trainable parameters: {n_params:.6f}M".format(
-            n_params / 1e6
-        )
-    )
+    print(f"[MODEL] {model}, number of trainable parameters: {n_params / 1e6:.6f}M")
 
     model.to(device)
 
@@ -357,13 +374,13 @@ def main(args):
         ema_state_dict1 = checkpoint["model_ema1"]
         ema_state_dict2 = checkpoint["model_ema2"]
         model_without_ddp.ema_params1 = [
-            ema_state_dict1[name].cuda()
+            ema_state_dict1[name].to(device)
             if "bg_subnet" not in name
             else model_without_ddp.state_dict()[name]
             for name, _ in model_without_ddp.named_parameters()
         ]
         model_without_ddp.ema_params2 = [
-            ema_state_dict2[name].cuda()
+            ema_state_dict2[name].to(device)
             if "bg_subnet" not in name
             else model_without_ddp.state_dict()[name]
             for name, _ in model_without_ddp.named_parameters()
@@ -420,38 +437,36 @@ def main(args):
                 optimizer=optimizer,
                 epoch=epoch,
             )
-        # if epoch % args.eval_epoch == 0 or epoch + 1 == args.epochs:
-        #     total_scores = evaluate_best_metric(
-        #         model_without_ddp, data_loader_val, device
-        #     )
-        #     print(
-        #         f"Epoch [{epoch}] - "
-        #         f"score: {total_scores['score']:.4f}, "
-        #         f"psnr: {total_scores['psnr']:.4f}, "
-        #         f"ssim: {total_scores['ssim']:.4f}, "
-        #         f"lpips: {total_scores['lpips']:.4f}"
-        #     )
-        #
-        #     if log_writer is not None:
-        #         log_writer.add_scalar(
-        #             "val_composite_score", total_scores["score"], epoch
-        #         )
-        #         log_writer.add_scalar("val_composite_psnr", total_scores["psnr"], epoch)
-        #         log_writer.add_scalar("val_composite_ssim", total_scores["ssim"], epoch)
-        #         log_writer.add_scalar(
-        #             "val_composite_lpips", total_scores["lpips"], epoch
-        #         )
-        #
-        #     if total_scores["score"] > best_score:
-        #         best_score = total_scores["score"]
-        #         print(f"New Best score: {best_score:.4f}, saving...")
-        #         misc.save_model(
-        #             args=args,
-        #             model_without_ddp=model_without_ddp,
-        #             optimizer=optimizer,
-        #             epoch=epoch,
-        #             epoch_name="best",
-        #         )
+        if args.online_eval and (epoch % args.eval_epoch == 0 or epoch + 1 == args.epochs):
+            total_scores = evaluate_best_metric(
+                model_without_ddp, data_loader_val, device, steps=args.num_sampling_steps
+            )
+            print(
+                f"Epoch [{epoch}] - "
+                f"score: {total_scores['score']:.4f}, "
+                f"psnr_y: {total_scores['psnr']:.4f}, "
+                f"ssim_y: {total_scores['ssim']:.4f}, "
+                f"lpips: {total_scores['lpips']:.4f}"
+            )
+
+            if log_writer is not None:
+                log_writer.add_scalar(
+                    "val_composite_score", total_scores["score"], epoch
+                )
+                log_writer.add_scalar("val_psnr_y", total_scores["psnr"], epoch)
+                log_writer.add_scalar("val_ssim_y", total_scores["ssim"], epoch)
+                log_writer.add_scalar("val_lpips", total_scores["lpips"], epoch)
+
+            if total_scores["score"] > best_score:
+                best_score = total_scores["score"]
+                print(f"New Best score: {best_score:.4f}, saving...")
+                misc.save_model(
+                    args=args,
+                    model_without_ddp=model_without_ddp,
+                    optimizer=optimizer,
+                    epoch=epoch,
+                    epoch_name="best",
+                )
 
         if misc.is_main_process() and log_writer is not None:
             log_writer.flush()

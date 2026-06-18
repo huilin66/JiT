@@ -61,8 +61,8 @@ class DynamicRaindropLoss(nn.Module):
     def forward(self, pred, target):
         loss_rec = self.charbonnier(pred, target)
 
-        pred_01 = (pred + 1.0) / 2.0
-        target_01 = (target + 1.0) / 2.0
+        pred_01 = ((pred + 1.0) / 2.0).clamp(0.0, 1.0)
+        target_01 = ((target + 1.0) / 2.0).clamp(0.0, 1.0)
         loss_ssim = 1.0 - ssim(
             pred_01.float(), target_01.float(), data_range=1.0, size_average=True
         )

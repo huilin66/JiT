@@ -21,6 +21,18 @@ import util.misc as misc
 lpips_vgg = None
 
 
+def _to_model_range(x, device):
+    x = x.to(device, non_blocking=True).to(torch.float32)
+    if x.max() > 2.0:
+        x = x.div(255.0)
+    return x * 2.0 - 1.0
+
+
+def _rgb_to_y(x):
+    r, g, b = x[:, 0:1], x[:, 1:2], x[:, 2:3]
+    return 0.299 * r + 0.587 * g + 0.114 * b
+
+
 def train_one_epoch(
     model,
     criterion,
@@ -54,12 +66,9 @@ def train_one_epoch(
         )
 
         # normalize image to [-1, 1]
-        x = img_drop.to(device, non_blocking=True).to(torch.float32).div_(255)
-        x = x * 2.0 - 1.0
-        y = img_clear.to(device, non_blocking=True).to(torch.float32).div_(255)
-        y = y * 2.0 - 1.0
-
-        dummy_labels.to(device)
+        x = _to_model_range(img_drop, device)
+        y = _to_model_range(img_clear, device)
+        dummy_labels = dummy_labels.to(device, non_blocking=True)
 
         with torch.amp.autocast("cuda", dtype=torch.bfloat16):
             y_pred = model(x, y, dummy_labels)
@@ -123,16 +132,13 @@ def evaluate_best_metric(
         "ssim": 0.0,
         "lpips": 0.0,
     }
-    total_score = 0.0
     num_samples = 0
     print("Running composite evaluation (PSNR, SSIM, LPIPS) on validation subset...")
     for img_drop, img_clear, dummy_labels in tqdm(data_loader_val):
         B, N, C, H, W = img_drop.shape
-        x = img_drop.view(-1, C, H, W).to(device, non_blocking=True)
-        y = img_clear.view(-1, C, H, W).to(device, non_blocking=True)
-        dummy_labels = dummy_labels.to(device)
-        x = x.to(torch.float32).div_(255.0) * 2.0 - 1.0
-        y = y.to(torch.float32).div_(255.0) * 2.0 - 1.0
+        x = _to_model_range(img_drop.view(-1, C, H, W), device)
+        y = _to_model_range(img_clear.view(-1, C, H, W), device)
+        dummy_labels = dummy_labels.view(-1).to(device, non_blocking=True)
         with torch.amp.autocast("cuda", dtype=torch.bfloat16):
             pred_x = model_without_ddp.generate_i2i(
                 x, steps=steps, dummy_labels=dummy_labels
@@ -141,10 +147,12 @@ def evaluate_best_metric(
         val_lpips = lpips_vgg(pred_clamp, y).mean().item()
         pred_01 = (pred_clamp + 1.0) / 2.0
         y_01 = (y + 1.0) / 2.0
+        pred_y = _rgb_to_y(pred_01)
+        target_y = _rgb_to_y(y_01)
 
-        mse = torch.mean((pred_01 - y_01) ** 2, dim=[1, 2, 3])
+        mse = torch.mean((pred_y - target_y) ** 2, dim=[1, 2, 3])
         val_psnr = -10 * torch.log10(mse + 1e-8).mean().item()
-        val_ssim = ssim(pred_01, y_01, data_range=1.0).item()
+        val_ssim = ssim(pred_y, target_y, data_range=1.0).item()
 
         composite_score = val_psnr + 10.0 * val_ssim - 5.0 * val_lpips
 
@@ -154,25 +162,33 @@ def evaluate_best_metric(
         total_scores["lpips"] += val_lpips * x.size(0)
         num_samples += x.size(0)
 
-    # 计算平均得分
-    total_scores["score"] = total_scores["score"] / max(1, num_samples)
-    total_scores["psnr"] = total_scores["psnr"] / max(1, num_samples)
-    total_scores["ssim"] = total_scores["ssim"] / max(1, num_samples)
-    total_scores["lpips"] = total_scores["lpips"] / max(1, num_samples)
-
     # 2. 验证结束，把权重切回到在线训练状态
     if not pure_val:
         model_without_ddp.load_state_dict(model_state_dict)
         model_without_ddp.train()
 
-    # DDP 多卡同步均值
-    total_scores["score"] = torch.tensor(total_scores["score"]).cuda()
-    total_scores["psnr"] = torch.tensor(total_scores["psnr"]).cuda()
-    total_scores["ssim"] = torch.tensor(total_scores["ssim"]).cuda()
-    total_scores["lpips"] = torch.tensor(total_scores["lpips"]).cuda()
-    total_scores["score"] = misc.all_reduce_mean(total_scores["score"]).item()
-    total_scores["psnr"] = misc.all_reduce_mean(total_scores["psnr"]).item()
-    total_scores["ssim"] = misc.all_reduce_mean(total_scores["ssim"]).item()
-    total_scores["lpips"] = misc.all_reduce_mean(total_scores["lpips"]).item()
+    if misc.is_dist_avail_and_initialized():
+        stats = torch.tensor(
+            [
+                total_scores["score"],
+                total_scores["psnr"],
+                total_scores["ssim"],
+                total_scores["lpips"],
+                float(num_samples),
+            ],
+            device=device,
+        )
+        torch.distributed.all_reduce(stats)
+        total_scores["score"] = stats[0].item()
+        total_scores["psnr"] = stats[1].item()
+        total_scores["ssim"] = stats[2].item()
+        total_scores["lpips"] = stats[3].item()
+        num_samples = int(stats[4].item())
+
+    denom = max(1, num_samples)
+    total_scores["score"] = total_scores["score"] / denom
+    total_scores["psnr"] = total_scores["psnr"] / denom
+    total_scores["ssim"] = total_scores["ssim"] / denom
+    total_scores["lpips"] = total_scores["lpips"] / denom
 
     return total_scores

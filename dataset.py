@@ -46,16 +46,17 @@ class PairedRainDataset(Dataset):
 
 
 class ScenePairedRainDataset(Dataset):
-    def __init__(self, rain_dir, clean_dir, transform=None):
+    def __init__(self, rain_dir, clean_dir, transform=None, scene_path=None):
         self.rain_dir = rain_dir
         self.clean_dir = clean_dir
         # 假设你的雨滴图和干净图文件名完全一致
         self.image_files = sorted(os.listdir(rain_dir))
         self.transform = transform
+        self.scene_path = scene_path
         self.scene_info = self._get_scene()
 
     def _get_scene(self):
-        scene_path = r"/scrinvme/huilin/bdd/cp_data/raindrop_remove_2026/record.csv"
+        scene_path = self.scene_path or r"/scrinvme/huilin/bdd/cp_data/raindrop_remove_2026/record.csv"
         df = pd.read_csv(scene_path, header=0, index_col=False)
         df["folder_name"] = df["folder_name"].astype(str).str.zfill(5)
 
@@ -93,22 +94,23 @@ class ScenePairedRainDataset(Dataset):
         union_key = f"{time_prefix}_{folder_name}"  # 得到 "D_00003"
 
         # 4. 查表，查不到默认给 0
-        class_id = int(self.scene_info.get(union_key))
+        class_id = int(self.scene_info.get(union_key, 0))
         dummy_labels = torch.zeros(1, dtype=torch.long) + class_id
         return rain_img, clean_img, dummy_labels
 
 
 class ScenePairedRainDatasetV2(Dataset):
-    def __init__(self, rain_dir, clean_dir, transform=None):
+    def __init__(self, rain_dir, clean_dir, transform=None, scene_path=None):
         self.rain_dir = rain_dir
         self.clean_dir = clean_dir
         # 假设你的雨滴图和干净图文件名完全一致
         self.image_files = sorted(os.listdir(rain_dir))
         self.transform = transform
+        self.scene_path = scene_path
         self.scene_info = self._get_scene()
 
     def _get_scene(self):
-        scene_path = r"/scrinvme/huilin/bdd/cp_data/raindrop_remove_2026/RainDrop_Train2/Drop_scen_pred.json"
+        scene_path = self.scene_path or r"/scrinvme/huilin/bdd/cp_data/raindrop_remove_2026/RainDrop_Train2/Drop_scen_pred.json"
         with open(scene_path, "r") as f:
             scene_info = json.load(f)
 
@@ -126,7 +128,7 @@ class ScenePairedRainDatasetV2(Dataset):
         clean_img = Image.open(clean_path).convert("RGB")
 
         rain_img, clean_img = self.transform(rain_img, clean_img)
-        class_id = int(self.scene_info.get(img_name))
+        class_id = int(self.scene_info.get(img_name, 0))
         dummy_labels = torch.zeros(1, dtype=torch.long) + class_id
         return rain_img, clean_img, dummy_labels
 
@@ -188,16 +190,17 @@ class ValPatchDataset(Dataset):
 
 
 class SceneValPatchDataset(Dataset):
-    def __init__(self, rain_dir, clean_dir, patch_size=256, stride=256):
+    def __init__(self, rain_dir, clean_dir, patch_size=256, stride=256, scene_path=None):
         self.rain_dir = rain_dir
         self.clean_dir = clean_dir
         self.image_files = sorted(os.listdir(rain_dir))
         self.patch_size = patch_size
         self.stride = stride  # 验证时可以不重叠，stride 设为 256 提速
+        self.scene_path = scene_path
         self.scene_info = self._get_scene()
 
     def _get_scene(self):
-        scene_path = r"/scrinvme/huilin/bdd/cp_data/raindrop_remove_2026/record.csv"
+        scene_path = self.scene_path or r"/scrinvme/huilin/bdd/cp_data/raindrop_remove_2026/record.csv"
         df = pd.read_csv(scene_path, header=0, index_col=False)
         df["folder_name"] = df["folder_name"].astype(str).str.zfill(5)
 
@@ -259,23 +262,24 @@ class SceneValPatchDataset(Dataset):
         folder_name = parts[1]  # '00003'
         time_prefix = "D" if time_type.lower() == "day" else "N"
         union_key = f"{time_prefix}_{folder_name}"  # 得到 "D_00003"
-        class_id = int(self.scene_info.get(union_key))
+        class_id = int(self.scene_info.get(union_key, 0))
         dummy_labels = torch.zeros(rain_tensor.shape[0], dtype=torch.long) + class_id
         # print(rain_tensor.shape, clean_tensor.shape, dummy_labels.shape)
         return rain_tensor, clean_tensor, dummy_labels
 
 
 class SceneValPatchDatasetV2(Dataset):
-    def __init__(self, rain_dir, clean_dir, patch_size=256, stride=256):
+    def __init__(self, rain_dir, clean_dir, patch_size=256, stride=256, scene_path=None):
         self.rain_dir = rain_dir
         self.clean_dir = clean_dir
         self.image_files = sorted(os.listdir(rain_dir))
         self.patch_size = patch_size
         self.stride = stride  # 验证时可以不重叠，stride 设为 256 提速
+        self.scene_path = scene_path
         self.scene_info = self._get_scene()
 
     def _get_scene(self):
-        scene_path = r"/scrinvme/huilin/bdd/cp_data/raindrop_remove_2026/RainDrop_Train2/Drop_scen_pred.json"
+        scene_path = self.scene_path or r"/scrinvme/huilin/bdd/cp_data/raindrop_remove_2026/RainDrop_Train2/Drop_scen_pred.json"
         with open(scene_path, "r") as f:
             scene_info = json.load(f)
 
@@ -325,7 +329,7 @@ class SceneValPatchDatasetV2(Dataset):
         rain_tensor = torch.stack(rain_patches, dim=0)
         clean_tensor = torch.stack(clean_patches, dim=0)
 
-        scene_id = self.scene_info.get(img_name)
+        scene_id = self.scene_info.get(img_name, 0)
         # print(f'{img_name}, {scene_id}')
         class_id = int(scene_id)
         dummy_labels = torch.zeros(rain_tensor.shape[0], dtype=torch.long) + class_id
