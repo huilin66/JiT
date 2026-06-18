@@ -101,6 +101,10 @@ def train_one_epoch(
                 log_writer.add_scalar("train_loss", loss_value_reduce, epoch_1000x)
                 log_writer.add_scalar("lr", lr, epoch_1000x)
 
+        if args.max_train_steps > 0 and data_iter_step + 1 >= args.max_train_steps:
+            print(f"Reached max_train_steps={args.max_train_steps}; stopping epoch early.")
+            break
+
 
 @torch.no_grad()
 def evaluate_best_metric(

@@ -90,6 +90,12 @@ def get_args_parser():
         help="Path to scene labels for validation set. Defaults to scene_train_path.",
     )
     parser.add_argument("--eval_epoch", type=int, default=5, help="eval_epoch")
+    parser.add_argument(
+        "--max_train_steps",
+        type=int,
+        default=0,
+        help="Stop each epoch after this many iterations. 0 means full epoch.",
+    )
     # training
     parser.add_argument("--epochs", default=600, type=int)
     parser.add_argument(
