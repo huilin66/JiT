@@ -3,6 +3,7 @@ output_dir/
 .idea/
 __pycache__/
 demo/
+ckpt/
 
 *.pth
 *.csv
