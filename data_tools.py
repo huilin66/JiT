@@ -277,7 +277,7 @@ def convert_manual_labels(input_csv, output_csv):
 if __name__ == "__main__":
     pass
 
-    ROOT_DIR = r"/scrinvme/huilin/bdd/cp_data/raindrop_remove_2026"
+    ROOT_DIR = r"/root/huilin/data/eccv_dn"
     DATA_DAY = os.path.join(ROOT_DIR, "DayRainDrop_Train")
     DATA_NIGHT = os.path.join(ROOT_DIR, "NightRainDrop_Train")
     DATA_TRAIN = os.path.join(ROOT_DIR, "RainDrop_Train")
@@ -292,9 +292,9 @@ if __name__ == "__main__":
     LAPLACIAN_THRESH = 500.0  # 大于500认为是背景清晰(Focus BG)，小于等于500认为是背景虚化(Focus Raindrop)
 
 
-    copy_data(DATA_DAY, DATA_TRAIN, drop_dir_name=DROP_DIR_NAME, type="Day")
-    copy_data(DATA_NIGHT, DATA_TRAIN, clear_dir_name=CLEAR_DIR_NAME, type="Night")
-
+    copy_data(DATA_DAY, DATA_TRAIN, drop_dir_name=DROP_DIR_NAME, clear_dir_name=CLEAR_DIR_NAME, type="Day")
+    copy_data(DATA_NIGHT, DATA_TRAIN, drop_dir_name=DROP_DIR_NAME, clear_dir_name=CLEAR_DIR_NAME, type="Night")
+    
     # used for mannual label check
     # extract_sample_images(DATA_DAY, DATA_DAY + "_overall")
     # extract_sample_images(DATA_NIGHT, DATA_NIGHT + "_overall")
