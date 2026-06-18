@@ -5,6 +5,13 @@ import shutil
 import cv2
 import numpy as np
 from tqdm import tqdm
+import os
+import shutil
+
+from tqdm import tqdm
+import os
+
+import pandas as pd
 
 
 def analyze_image(img_path):
@@ -170,10 +177,7 @@ def count_dataset_images(base_dir):
     print(f"🖼️ 总图片总数: {total_images}")
 
 
-import os
-import shutil
 
-from tqdm import tqdm
 
 
 def extract_sample_images(source_dir, dest_dir):
@@ -224,10 +228,6 @@ def extract_sample_images(source_dir, dest_dir):
     print(f"👉 请打开 {os.path.abspath(dest_dir)} 文件夹进行肉眼判断。")
 
 
-import os
-
-import pandas as pd
-
 
 def convert_manual_labels(input_csv, output_csv):
     if not os.path.exists(input_csv):
@@ -276,36 +276,26 @@ def convert_manual_labels(input_csv, output_csv):
 
 if __name__ == "__main__":
     pass
-    DATA_DAY = (
-        r"/scrinvme/huilin/bdd/cp_data/raindrop_remove_2026/DayRainDrop_Train/Drop"
-    )
-    DATA_NIGHT = (
-        r"/scrinvme/huilin/bdd/cp_data/raindrop_remove_2026/NightRainDrop_Train/Drop"
-    )
-    # count_dataset_images(DATA_DAY)
-    # count_dataset_images(DATA_NIGHT)
-    # DATA_DAY = r"/scrinvme/huilin/bdd/cp_data/raindrop_remove_2026/DayRainDrop_Train"
-    # DATA_NIGHT = r"/scrinvme/huilin/bdd/cp_data/raindrop_remove_2026/NightRainDrop_Train"
-    # DATA_MERGE = r"/scrinvme/huilin/bdd/cp_data/raindrop_remove_2026/RainDrop_Train2"
-    # DROP_DIR_NAME = "Drop"
-    # CLEAR_DIR_NAME = "Clear"
-    # copy_data(DATA_DAY, DATA_MERGE, drop_dir_name=DROP_DIR_NAME, type="Day")
-    # copy_data(DATA_NIGHT, DATA_MERGE, clear_dir_name=CLEAR_DIR_NAME, type="Night")
 
-    # ================= 配置区 =================
-    # 你的 Drop 文件夹绝对路径 (包含 00166, 00167 等子文件夹的父目录)
+    ROOT_DIR = r"/scrinvme/huilin/bdd/cp_data/raindrop_remove_2026"
+    DATA_DAY = os.path.join(ROOT_DIR, "DayRainDrop_Train")
+    DATA_NIGHT = os.path.join(ROOT_DIR, "NightRainDrop_Train")
+    DATA_TRAIN = os.path.join(ROOT_DIR, "RainDrop_Train")
 
+    DROP_DIR_NAME = "Drop"
+    CLEAR_DIR_NAME = "Clear"
+
+    DATA_TRAIN_DROP = os.path.join(DATA_TRAIN, DROP_DIR_NAME)
+    SCENE_TRAIN_CSV = os.path.join(DATA_TRAIN, "train_scene.csv")
+
+    INTENSITY_THRESH = 100.0  # 大于80认为是白天，小于等于80认为是黑夜
+    LAPLACIAN_THRESH = 500.0  # 大于500认为是背景清晰(Focus BG)，小于等于500认为是背景虚化(Focus Raindrop)
+
+
+    copy_data(DATA_DAY, DATA_TRAIN, drop_dir_name=DROP_DIR_NAME, type="Day")
+    copy_data(DATA_NIGHT, DATA_TRAIN, clear_dir_name=CLEAR_DIR_NAME, type="Night")
+
+    # used for mannual label check
     # extract_sample_images(DATA_DAY, DATA_DAY + "_overall")
     # extract_sample_images(DATA_NIGHT, DATA_NIGHT + "_overall")
-
-    # rain_dir = r"/scrinvme/huilin/bdd/cp_data/raindrop_remove_2026/RainDrop_Train2/Drop"
-    # output_csv = "/scrinvme/huilin/bdd/cp_data/raindrop_remove_2026/RainDrop_Train2/train_scene.csv"
-
-    # INTENSITY_THRESH = 100.0  # 大于80认为是白天，小于等于80认为是黑夜
-    # LAPLACIAN_THRESH = 500.0  # 大于500认为是背景清晰(Focus BG)，小于等于500认为是背景虚化(Focus Raindrop)
-    # day140
-    # generate_pseudo_labels(rain_dir, output_csv, INTENSITY_THRESH, LAPLACIAN_THRESH)
-
-    input_csv = r"/scrinvme/huilin/bdd/cp_data/raindrop_remove_2026/record.xlsx"  # 你上传的文件名
-    output_csv = r"/scrinvme/huilin/bdd/cp_data/raindrop_remove_2026/record.csv"  # 你上传的文件名
-    convert_manual_labels(input_csv, output_csv)
+    generate_pseudo_labels(DATA_TRAIN_DROP, SCENE_TRAIN_CSV, INTENSITY_THRESH, LAPLACIAN_THRESH)
