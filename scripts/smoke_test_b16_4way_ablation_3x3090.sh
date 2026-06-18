@@ -1,22 +1,27 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Fast sanity check for the four ablation settings.
-# It runs only a few train iterations and one tiny online evaluation per config.
+# 在项目根目录执行：
+# bash scripts/smoke_test_b16_4way_ablation_3x3090.sh
 #
-# Example:
-# DATA_PATH=/data/RainDrop_Train2 CKPT=/data/jit-b-16 bash scripts/smoke_test_b16_4way_ablation_3x3090.sh
+# 也可以覆盖默认配置：
+# DATA_ROOT=/data/eccv_dn \
+# CKPT=/data/jit-b-16 \
+# bash scripts/smoke_test_b16_4way_ablation_3x3090.sh
+
+DATA_ROOT=${DATA_ROOT:-/root/huilin/data/eccv_dn}
+
+DATA_PATH=${DATA_PATH:-${DATA_ROOT}/RainDrop_Train}
+VAL_DATA_PATH=${VAL_DATA_PATH:-${DATA_PATH}}
 
 GPUS=${GPUS:-0,1,2}
 NPROC=${NPROC:-3}
 MASTER_PORT_BASE=${MASTER_PORT_BASE:-29710}
 
-DATA_PATH=${DATA_PATH:-/scrinvme/huilin/bdd/cp_data/raindrop_remove_2026/RainDrop_Train2}
-VAL_DATA_PATH=${VAL_DATA_PATH:-${DATA_PATH}}
-CKPT=${CKPT:-/scrinvme/huilin/bdd/cp_data/raindrop_remove_2026/jit-b-16}
-OUT_ROOT=${OUT_ROOT:-/tmp/jit_b16_ablation_smoke}
+CKPT=${CKPT:-ckpt/jit-b-16}
+OUT_ROOT=${OUT_ROOT:-run/train_smoke/jit_b16}
 
-SCENE_TRAIN_PATH=${SCENE_TRAIN_PATH:-}
+SCENE_TRAIN_PATH=${SCENE_TRAIN_PATH:-${DATA_PATH}/Drop_scen_pred.json}
 SCENE_VAL_PATH=${SCENE_VAL_PATH:-${SCENE_TRAIN_PATH}}
 
 MODEL=${MODEL:-JiT-B/16}
@@ -29,9 +34,11 @@ EVAL_NUM_IMAGES=${EVAL_NUM_IMAGES:-1}
 NUM_SAMPLING_STEPS=${NUM_SAMPLING_STEPS:-1}
 
 scene_args=()
+
 if [[ -n "${SCENE_TRAIN_PATH}" ]]; then
   scene_args+=(--scene_train_path "${SCENE_TRAIN_PATH}")
 fi
+
 if [[ -n "${SCENE_VAL_PATH}" ]]; then
   scene_args+=(--scene_val_path "${SCENE_VAL_PATH}")
 fi
@@ -44,8 +51,11 @@ run_smoke() {
   local output_dir="${OUT_ROOT}/${name}/16"
 
   echo "============================================================"
-  echo "[Smoke] ${name}: use_scene_dataset=${use_scene}, use_bg_subnet=${use_head}"
-  echo "Output: ${output_dir}"
+  echo "[Smoke] ${name}"
+  echo "use_scene_dataset=${use_scene}"
+  echo "use_bg_subnet=${use_head}"
+  echo "data_path=${DATA_PATH}"
+  echo "output_dir=${output_dir}"
   echo "============================================================"
 
   CUDA_VISIBLE_DEVICES="${GPUS}" torchrun \
