@@ -2,8 +2,11 @@ output/
 output_dir/
 .idea/
 __pycache__/
+demo/
 
 *.pth
 *.csv
 *.json
 *.pyc
+*.jpg
+*.png
