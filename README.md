@@ -140,6 +140,46 @@ to evaluate FID and IS against a reference image folder or statistics. You can u
 to prepare the reference image folder, or directly use our pre-computed reference stats
 under ```fid_stats```.
 
+### Raindrop Removal / Paired Restoration
+
+JiT can also be trained as a paired restoration model. In this mode the model is conditioned on a rainy image and learns a flow from the rainy image to the clean target, instead of generating from class labels and pure Gaussian noise.
+
+Expected paired directory layout:
+```
+${DATA_PATH}/Drop/.../image.png
+${DATA_PATH}/Clear/.../image.png
+```
+
+or pass the directories explicitly with `--rainy_dir` and `--clean_dir`. Files are matched by relative path first, then by stem.
+
+Example training command:
+```
+torchrun --nproc_per_node=8 --nnodes=1 --node_rank=0 \
+main_jit.py \
+--task restoration \
+--model JiT-B/16 \
+--img_size 256 --batch_size 32 --blr 5e-5 \
+--epochs 300 --warmup_epochs 5 --lr_schedule cosine \
+--restoration_bridge condition --predict_residual \
+--recon_l1_weight 1.0 --residual_l1_weight 0.2 --ssim_loss_weight 0.1 --gradient_loss_weight 0.05 \
+--num_sampling_steps 8 --sampling_method heun \
+--data_path ${RAINDROP_PATH} \
+--output_dir ${OUTPUT_DIR} --resume ${OUTPUT_DIR}
+```
+
+Example validation or test restoration:
+```
+torchrun --nproc_per_node=1 --nnodes=1 --node_rank=0 \
+main_jit.py \
+--task restoration \
+--model JiT-B/16 \
+--img_size 256 --gen_bsz 8 \
+--num_sampling_steps 8 --sampling_method heun \
+--output_dir ${CKPT_DIR} --resume ${CKPT_DIR} \
+--val_rainy_dir ${VAL_DROP_DIR} --val_clean_dir ${VAL_CLEAR_DIR} \
+--evaluate_restoration --save_eval_images
+```
+
 ### Acknowledgements
 
 We thank Google TPU Research Cloud (TRC) for granting us access to TPUs, and the MIT

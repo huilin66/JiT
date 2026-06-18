@@ -13,9 +13,10 @@ import torchvision.datasets as datasets
 
 from util.crop import center_crop_arr
 import util.misc as misc
+from util.paired_dataset import PairedImageDataset
 
 import copy
-from engine_jit import train_one_epoch, evaluate
+from engine_jit import train_one_epoch, evaluate, evaluate_restoration
 
 from denoiser import Denoiser
 
@@ -24,6 +25,8 @@ def get_args_parser():
     parser = argparse.ArgumentParser('JiT', add_help=False)
 
     # architecture
+    parser.add_argument('--task', default='generation', choices=['generation', 'restoration'],
+                        help='Train class-conditional generation or paired image restoration')
     parser.add_argument('--model', default='JiT-B/16', type=str, metavar='MODEL',
                         help='Name of the model to train')
     parser.add_argument('--img_size', default=256, type=int, help='Image size')
@@ -55,6 +58,35 @@ def get_args_parser():
     parser.add_argument('--noise_scale', default=1.0, type=float)
     parser.add_argument('--t_eps', default=5e-2, type=float)
     parser.add_argument('--label_drop_prob', default=0.1, type=float)
+    parser.add_argument('--restoration_label_drop_prob', default=0.0, type=float,
+                        help='Label dropout used only for restoration task')
+
+    # restoration
+    parser.add_argument('--rainy_dir', default='', type=str,
+                        help='Training degraded/rainy image directory. Defaults to data_path/Drop or data_path/train/Drop.')
+    parser.add_argument('--clean_dir', default='', type=str,
+                        help='Training clean image directory. Defaults to data_path/Clear or data_path/train/Clear.')
+    parser.add_argument('--val_rainy_dir', default='', type=str,
+                        help='Validation/test rainy image directory for restoration evaluation.')
+    parser.add_argument('--val_clean_dir', default='', type=str,
+                        help='Validation clean image directory. Leave empty to only save restored images.')
+    parser.add_argument('--resize_size', default=0, type=int,
+                        help='Resize paired restoration images to this square size before crop; 0 keeps aspect ratio.')
+    parser.add_argument('--no_hflip', action='store_false', dest='hflip')
+    parser.add_argument('--no_vflip', action='store_false', dest='vflip')
+    parser.add_argument('--no_rot90', action='store_false', dest='rot90')
+    parser.set_defaults(hflip=True, vflip=True, rot90=True)
+    parser.add_argument('--restoration_bridge', default='condition', choices=['condition', 'noise'],
+                        help='condition starts sampling from the rainy image; noise keeps the original diffusion source.')
+    parser.add_argument('--condition_noise_scale', default=0.0, type=float,
+                        help='Optional noise added to the rainy source during condition-bridge training.')
+    parser.add_argument('--predict_residual', action='store_true', default=True,
+                        help='Predict residual and add it to the rainy image for restoration.')
+    parser.add_argument('--no_predict_residual', action='store_false', dest='predict_residual')
+    parser.add_argument('--recon_l1_weight', default=1.0, type=float)
+    parser.add_argument('--residual_l1_weight', default=0.2, type=float)
+    parser.add_argument('--ssim_loss_weight', default=0.1, type=float)
+    parser.add_argument('--gradient_loss_weight', default=0.05, type=float)
 
     parser.add_argument('--seed', default=0, type=int)
     parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
@@ -82,6 +114,8 @@ def get_args_parser():
                         help='Frequency (in epochs) for evaluation')
     parser.add_argument('--online_eval', action='store_true')
     parser.add_argument('--evaluate_gen', action='store_true')
+    parser.add_argument('--evaluate_restoration', action='store_true')
+    parser.add_argument('--save_eval_images', action='store_true')
     parser.add_argument('--gen_bsz', type=int, default=256,
                         help='Generation batch size')
 
@@ -112,6 +146,61 @@ def get_args_parser():
     return parser
 
 
+def _first_existing(paths):
+    for path in paths:
+        path = Path(path)
+        if path.exists():
+            return str(path)
+    return ''
+
+
+def _resolve_restoration_dirs(args, split):
+    root = Path(args.data_path)
+    if split == 'train':
+        rainy_dir = args.rainy_dir or _first_existing([
+            root / 'train' / 'Drop',
+            root / 'Drop',
+            root / 'train' / 'rainy',
+            root / 'rainy',
+            root / 'train' / 'input',
+            root / 'input',
+        ])
+        clean_dir = args.clean_dir or _first_existing([
+            root / 'train' / 'Clear',
+            root / 'Clear',
+            root / 'train' / 'clean',
+            root / 'clean',
+            root / 'train' / 'gt',
+            root / 'gt',
+            root / 'train' / 'target',
+            root / 'target',
+        ])
+        if not rainy_dir or not clean_dir:
+            raise RuntimeError(
+                'Restoration training needs paired directories. Set --rainy_dir and --clean_dir, '
+                'or arrange data as data_path/Drop and data_path/Clear.'
+            )
+        return rainy_dir, clean_dir
+
+    rainy_dir = args.val_rainy_dir or _first_existing([
+        root / 'val' / 'Drop',
+        root / 'validation' / 'Drop',
+        root / 'test' / 'Drop',
+        root / 'val' / 'rainy',
+        root / 'validation' / 'rainy',
+        root / 'test' / 'rainy',
+    ])
+    clean_dir = args.val_clean_dir or _first_existing([
+        root / 'val' / 'Clear',
+        root / 'validation' / 'Clear',
+        root / 'val' / 'clean',
+        root / 'validation' / 'clean',
+        root / 'val' / 'gt',
+        root / 'validation' / 'gt',
+    ])
+    return rainy_dir, clean_dir
+
+
 def main(args):
     misc.init_distributed_mode(args)
     print('Job directory:', os.path.dirname(os.path.realpath(__file__)))
@@ -129,6 +218,12 @@ def main(args):
     num_tasks = misc.get_world_size()
     global_rank = misc.get_rank()
 
+    if args.task == 'restoration':
+        args.label_drop_prob = args.restoration_label_drop_prob
+        if args.class_num == 1000:
+            args.class_num = 1
+            print("Restoration task detected: using class_num=1 by default.")
+
     # Set up TensorBoard logging (only on main process)
     if global_rank == 0 and args.output_dir is not None:
         os.makedirs(args.output_dir, exist_ok=True)
@@ -136,19 +231,53 @@ def main(args):
     else:
         log_writer = None
 
-    # Data augmentation transforms
-    transform_train = transforms.Compose([
-        transforms.Lambda(lambda img: center_crop_arr(img, args.img_size)),
-        transforms.RandomHorizontalFlip(),
-        transforms.PILToTensor()
-    ])
+    dataset_val = None
+    has_val_targets = False
+    if args.task == 'restoration':
+        train_rainy_dir, train_clean_dir = _resolve_restoration_dirs(args, 'train')
+        dataset_train = PairedImageDataset(
+            train_rainy_dir,
+            train_clean_dir,
+            img_size=args.img_size,
+            train=True,
+            resize_size=args.resize_size,
+            hflip=args.hflip,
+            vflip=args.vflip,
+            rot90=args.rot90,
+        )
+        val_rainy_dir, val_clean_dir = _resolve_restoration_dirs(args, 'val')
+        if val_rainy_dir:
+            dataset_val = PairedImageDataset(
+                val_rainy_dir,
+                val_clean_dir if val_clean_dir else None,
+                img_size=args.img_size,
+                train=False,
+                resize_size=args.resize_size,
+                hflip=False,
+                vflip=False,
+                rot90=False,
+            )
+            has_val_targets = bool(val_clean_dir)
+        print("Restoration train set:", dataset_train)
+        if dataset_val is not None:
+            print("Restoration eval set:", dataset_val)
+    else:
+        # Data augmentation transforms
+        transform_train = transforms.Compose([
+            transforms.Lambda(lambda img: center_crop_arr(img, args.img_size)),
+            transforms.RandomHorizontalFlip(),
+            transforms.PILToTensor()
+        ])
 
-    dataset_train = datasets.ImageFolder(os.path.join(args.data_path, 'train'), transform=transform_train)
-    print(dataset_train)
+        dataset_train = datasets.ImageFolder(os.path.join(args.data_path, 'train'), transform=transform_train)
+        print(dataset_train)
 
-    sampler_train = torch.utils.data.DistributedSampler(
-        dataset_train, num_replicas=num_tasks, rank=global_rank, shuffle=True
-    )
+    if args.distributed:
+        sampler_train = torch.utils.data.DistributedSampler(
+            dataset_train, num_replicas=num_tasks, rank=global_rank, shuffle=True
+        )
+    else:
+        sampler_train = torch.utils.data.RandomSampler(dataset_train)
     print("Sampler_train =", sampler_train)
 
     data_loader_train = torch.utils.data.DataLoader(
@@ -158,6 +287,23 @@ def main(args):
         pin_memory=args.pin_mem,
         drop_last=True
     )
+
+    data_loader_val = None
+    if dataset_val is not None:
+        if args.distributed:
+            sampler_val = torch.utils.data.DistributedSampler(
+                dataset_val, num_replicas=num_tasks, rank=global_rank, shuffle=False
+            )
+        else:
+            sampler_val = torch.utils.data.SequentialSampler(dataset_val)
+        data_loader_val = torch.utils.data.DataLoader(
+            dataset_val,
+            sampler=sampler_val,
+            batch_size=args.gen_bsz,
+            num_workers=args.num_workers,
+            pin_memory=args.pin_mem,
+            drop_last=False
+        )
 
     torch._dynamo.config.cache_size_limit = 128
     torch._dynamo.config.optimize_ddp = False
@@ -179,8 +325,11 @@ def main(args):
     print("Actual lr: {:.2e}".format(args.lr))
     print("Effective batch size: %d" % eff_batch_size)
 
-    model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
-    model_without_ddp = model.module
+    if args.distributed:
+        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
+        model_without_ddp = model.module
+    else:
+        model_without_ddp = model
 
     # Set up optimizer with weight decay adjustment for bias and norm layers
     param_groups = misc.add_weight_decay(model_without_ddp, args.weight_decay)
@@ -195,8 +344,8 @@ def main(args):
 
         ema_state_dict1 = checkpoint['model_ema1']
         ema_state_dict2 = checkpoint['model_ema2']
-        model_without_ddp.ema_params1 = [ema_state_dict1[name].cuda() for name, _ in model_without_ddp.named_parameters()]
-        model_without_ddp.ema_params2 = [ema_state_dict2[name].cuda() for name, _ in model_without_ddp.named_parameters()]
+        model_without_ddp.ema_params1 = [ema_state_dict1[name].to(device) for name, _ in model_without_ddp.named_parameters()]
+        model_without_ddp.ema_params2 = [ema_state_dict2[name].to(device) for name, _ in model_without_ddp.named_parameters()]
         print("Resumed checkpoint from", args.resume)
 
         if 'optimizer' in checkpoint and 'epoch' in checkpoint:
@@ -209,13 +358,28 @@ def main(args):
         model_without_ddp.ema_params2 = copy.deepcopy(list(model_without_ddp.parameters()))
         print("Training from scratch")
 
-    # Evaluate generation
+    # Evaluate generation/restoration
     if args.evaluate_gen:
+        if args.task != 'generation':
+            raise RuntimeError("--evaluate_gen is only valid for generation. Use --evaluate_restoration for restoration.")
         print("Evaluating checkpoint at {} epoch".format(args.start_epoch))
         with torch.random.fork_rng():
             torch.manual_seed(seed)
             with torch.no_grad():
                 evaluate(model_without_ddp, args, 0, batch_size=args.gen_bsz, log_writer=log_writer)
+        return
+
+    if args.evaluate_restoration:
+        if args.task != 'restoration':
+            raise RuntimeError("--evaluate_restoration requires --task restoration.")
+        if data_loader_val is None:
+            raise RuntimeError("Restoration evaluation needs --val_rainy_dir or a val/test rainy directory under --data_path.")
+        print("Evaluating restoration checkpoint at {} epoch".format(args.start_epoch))
+        with torch.no_grad():
+            evaluate_restoration(
+                model_without_ddp, data_loader_val, device, args, 0,
+                log_writer=log_writer, has_targets=has_val_targets
+            )
         return
 
     # Training loop
@@ -249,7 +413,14 @@ def main(args):
         if args.online_eval and (epoch % args.eval_freq == 0 or epoch + 1 == args.epochs):
             torch.cuda.empty_cache()
             with torch.no_grad():
-                evaluate(model_without_ddp, args, epoch, batch_size=args.gen_bsz, log_writer=log_writer)
+                if args.task == 'restoration':
+                    if data_loader_val is not None:
+                        evaluate_restoration(
+                            model_without_ddp, data_loader_val, device, args, epoch,
+                            log_writer=log_writer, has_targets=has_val_targets
+                        )
+                else:
+                    evaluate(model_without_ddp, args, epoch, batch_size=args.gen_bsz, log_writer=log_writer)
             torch.cuda.empty_cache()
 
         if misc.is_main_process() and log_writer is not None:
