@@ -1,0 +1,8 @@
+tensorboard
+pandas
+einops
+opencv-python
+lpips
+torch_fidelity
+piq
+pytorch_msssim
