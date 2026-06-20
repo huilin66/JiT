@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Four-way JiT-B/16 ablation on 2 x RTX 6000 48GB.
 # The four experiments run sequentially and each experiment uses both GPUs.
-# Per-GPU batch 24 gives the same global batch (48) as 3 x 3090 with batch 16.
+# Default per-GPU batch is 64, giving a global batch of 128.
 #
 # Example:
 # DATA_PATH=/data/RainDrop_Train2 \
@@ -25,8 +25,8 @@ SCENE_VAL_PATH=${SCENE_VAL_PATH:-${SCENE_TRAIN_PATH}}
 
 MODEL=${MODEL:-JiT-B/16}
 IMG_SIZE=${IMG_SIZE:-256}
-BATCH_SIZE=${BATCH_SIZE:-24}
-LR=${LR:-5e-5}
+BATCH_SIZE=${BATCH_SIZE:-64}
+LR=${LR:-1e-4}
 EPOCHS=${EPOCHS:-600}
 WARMUP_EPOCHS=${WARMUP_EPOCHS:-5}
 EVAL_EPOCH=${EVAL_EPOCH:-5}
