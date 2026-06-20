@@ -15,10 +15,10 @@ GPUS=${GPUS:-0,1}
 NPROC=${NPROC:-2}
 MASTER_PORT_BASE=${MASTER_PORT_BASE:-29910}
 
-DATA_PATH=${DATA_PATH:-/data/RainDrop_Train2}
+DATA_PATH=${DATA_PATH:-/scrinvme/huilin/tp/eccv_dn/RainDrop_Train}
 VAL_DATA_PATH=${VAL_DATA_PATH:-${DATA_PATH}}
-CKPT=${CKPT:-/data/jit-b-16}
-OUT_ROOT=${OUT_ROOT:-/tmp/jit_b16_2xrtx6000_smoke}
+CKPT=${CKPT:-/scrinvme/huilin/tp/eccv_dn//jit-b-16}
+OUT_ROOT=${OUT_ROOT:-run/train_smoke/jit_b16_2xrtx6000_smoke}
 
 SCENE_TRAIN_PATH=${SCENE_TRAIN_PATH:-${DATA_PATH}/Drop_scen_pred.json}
 SCENE_VAL_PATH=${SCENE_VAL_PATH:-${SCENE_TRAIN_PATH}}

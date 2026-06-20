@@ -17,7 +17,7 @@ MASTER_PORT_BASE=${MASTER_PORT_BASE:-29610}
 DATA_PATH=${DATA_PATH:-/scrinvme/huilin/bdd/cp_data/raindrop_remove_2026/RainDrop_Train2}
 VAL_DATA_PATH=${VAL_DATA_PATH:-${DATA_PATH}}
 CKPT=${CKPT:-/scrinvme/huilin/bdd/cp_data/raindrop_remove_2026/jit-b-16}
-OUT_ROOT=${OUT_ROOT:-/scrinvme/huilin/bdd/cp_data/raindrop_remove_2026/output/ablation_b16_3x3090}
+OUT_ROOT=${OUT_ROOT:-run/train/ablation_b16_3x3090}
 
 # Optional scene-label json/csv. If empty, dataset.py falls back to its historical default path.
 SCENE_TRAIN_PATH=${SCENE_TRAIN_PATH:-}
