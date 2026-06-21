@@ -19,8 +19,6 @@ export PYTORCH_ALLOC_CONF=${PYTORCH_ALLOC_CONF:-max_split_size_mb:128}
 
 GPU=${GPU:-0}
 MASTER_PORT_BASE=${MASTER_PORT_BASE:-30110}
-# 注释掉旧的配置
-# export PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}
 
 DATA_PATH=${DATA_PATH:-D:/zhl/data/eccv_dn/RainDrop_Train}
 VAL_DATA_PATH=${VAL_DATA_PATH:-${DATA_PATH}}
