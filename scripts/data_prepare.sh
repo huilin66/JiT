@@ -3,7 +3,8 @@
 set -euo pipefail
 
 # DATA_ROOT="/root/huilin/data/eccv_dn"
-DATA_ROOT="/scrinvme/huilin/tp/eccv_dn"
+# DATA_ROOT="/scrinvme/huilin/tp/eccv_dn"
+DATA_ROOT="D:\zhl\data\eccv_dn"
 
 python tools/data_tools.py copy \
   --day-root "${DATA_ROOT}/DayRainDrop_Train" \

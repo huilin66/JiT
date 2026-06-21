@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Windows compatibility settings
+export TORCHDYNAMO_DISABLE=1
+export USE_LIBUV=0
+# 更新为新的环境变量名
+export PYTORCH_ALLOC_CONF=${PYTORCH_ALLOC_CONF:-max_split_size_mb:128}
+
 # Memory and functional smoke test for one RTX 5090 32GB.
 # Two epochs are intentional: with total_epochs=2, epoch 1 activates LPIPS.
 # Each epoch runs one training iteration, followed by one-image validation.
@@ -13,12 +19,13 @@ set -euo pipefail
 
 GPU=${GPU:-0}
 MASTER_PORT_BASE=${MASTER_PORT_BASE:-30110}
-export PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}
+# 注释掉旧的配置
+# export PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}
 
-DATA_PATH=${DATA_PATH:-/data/RainDrop_Train2}
+DATA_PATH=${DATA_PATH:-D:/zhl/data/eccv_dn/RainDrop_Train}
 VAL_DATA_PATH=${VAL_DATA_PATH:-${DATA_PATH}}
-CKPT=${CKPT:-/data/jit-b-16}
-OUT_ROOT=${OUT_ROOT:-/tmp/jit_b16_1x5090_smoke}
+CKPT=${CKPT:-ckpt/jit-b-16}
+OUT_ROOT=${OUT_ROOT:-run/jit_b16_1x5090_smoke}
 
 SCENE_TRAIN_PATH=${SCENE_TRAIN_PATH:-${DATA_PATH}/Drop_scen_pred.json}
 SCENE_VAL_PATH=${SCENE_VAL_PATH:-${SCENE_TRAIN_PATH}}
@@ -73,10 +80,8 @@ run_smoke() {
   echo "Epoch 0 tests normal loss; epoch 1 tests LPIPS backward."
   echo "============================================================"
 
-  CUDA_VISIBLE_DEVICES="${GPU}" torchrun \
-    --nproc_per_node=1 \
-    --master_port="${port}" \
-    main_jit.py \
+  # 使用python替代torchrun（单GPU模式）
+  CUDA_VISIBLE_DEVICES="${GPU}" python main_jit.py \
     --model "${MODEL}" \
     --proj_dropout 0.0 \
     --img_size "${IMG_SIZE}" \
