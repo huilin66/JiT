@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Each setting runs two epochs with one train iteration per epoch.
+# Epoch 1 activates LPIPS and tests its backward-memory peak.
+#
 # 在项目根目录执行：
 # bash scripts/smoke_test_b16_4way_ablation_3x3090.sh
 #
@@ -26,10 +29,10 @@ SCENE_VAL_PATH=${SCENE_VAL_PATH:-${SCENE_TRAIN_PATH}}
 
 MODEL=${MODEL:-JiT-B/16}
 IMG_SIZE=${IMG_SIZE:-256}
-BATCH_SIZE=${BATCH_SIZE:-2}
+BATCH_SIZE=${BATCH_SIZE:-16}
 LR=${LR:-5e-5}
 NUM_WORKERS=${NUM_WORKERS:-2}
-MAX_TRAIN_STEPS=${MAX_TRAIN_STEPS:-2}
+MAX_TRAIN_STEPS=${MAX_TRAIN_STEPS:-1}
 EVAL_NUM_IMAGES=${EVAL_NUM_IMAGES:-1}
 NUM_SAMPLING_STEPS=${NUM_SAMPLING_STEPS:-1}
 
@@ -54,6 +57,7 @@ run_smoke() {
   echo "[Smoke] ${name}"
   echo "use_scene_dataset=${use_scene}"
   echo "use_bg_subnet=${use_head}"
+  echo "Epoch 0 tests normal loss; epoch 1 tests LPIPS backward."
   echo "data_path=${DATA_PATH}"
   echo "output_dir=${output_dir}"
   echo "============================================================"
@@ -68,7 +72,7 @@ run_smoke() {
     --batch_size "${BATCH_SIZE}" \
     --lr "${LR}" \
     --lr_schedule cosine \
-    --epochs 1 \
+    --epochs 2 \
     --warmup_epochs 1 \
     --eval_epoch 1 \
     --eval_num_images "${EVAL_NUM_IMAGES}" \
@@ -93,4 +97,4 @@ run_smoke "b16_scene_no_head"    1 0 "$((MASTER_PORT_BASE + 1))"
 run_smoke "b16_no_scene_head"    0 1 "$((MASTER_PORT_BASE + 2))"
 run_smoke "b16_scene_head"       1 1 "$((MASTER_PORT_BASE + 3))"
 
-echo "All four smoke tests finished."
+echo "All four smoke tests passed, including LPIPS backward."

@@ -1,32 +1,31 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Four-way JiT-B/16 ablation on 2 x RTX 6000 48GB.
-# The four experiments run sequentially and each experiment uses both GPUs.
-# Default per-GPU batch is 64, giving a global batch of 128.
+# Four-way JiT-B/16 ablation on one RTX 5090 32GB.
+# Experiments run sequentially on GPU 0.
 #
 # Example:
 # DATA_PATH=/data/RainDrop_Train2 \
 # CKPT=/data/jit-b-16 \
 # SCENE_TRAIN_PATH=/data/RainDrop_Train2/Drop_scen_pred.json \
-# bash scripts/train_b16_4way_ablation_2xrtx6000_48g.sh
+# bash scripts/train_b16_4way_ablation_1x5090.sh
 
-GPUS=${GPUS:-0,1}
-NPROC=${NPROC:-2}
-MASTER_PORT_BASE=${MASTER_PORT_BASE:-29810}
+GPU=${GPU:-0}
+MASTER_PORT_BASE=${MASTER_PORT_BASE:-30010}
+export PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}
 
-DATA_PATH=${DATA_PATH:-/scrinvme/huilin/tp/eccv_dn/RainDrop_Train}
+DATA_PATH=${DATA_PATH:-/data/RainDrop_Train2}
 VAL_DATA_PATH=${VAL_DATA_PATH:-${DATA_PATH}}
-CKPT=${CKPT:-/scrinvme/huilin/tp/eccv_dn//jit-b-16}
-OUT_ROOT=${OUT_ROOT:-run/train/ablation_b16_2xrtx6000_48g}
+CKPT=${CKPT:-/data/jit-b-16}
+OUT_ROOT=${OUT_ROOT:-./output/ablation_b16_1x5090}
 
 SCENE_TRAIN_PATH=${SCENE_TRAIN_PATH:-${DATA_PATH}/Drop_scen_pred.json}
 SCENE_VAL_PATH=${SCENE_VAL_PATH:-${SCENE_TRAIN_PATH}}
 
 MODEL=${MODEL:-JiT-B/16}
 IMG_SIZE=${IMG_SIZE:-256}
-BATCH_SIZE=${BATCH_SIZE:-64}
-LR=${LR:-1e-4}
+BATCH_SIZE=${BATCH_SIZE:-32}
+LR=${LR:-2.5e-5}
 EPOCHS=${EPOCHS:-600}
 WARMUP_EPOCHS=${WARMUP_EPOCHS:-5}
 EVAL_EPOCH=${EVAL_EPOCH:-5}
@@ -37,8 +36,15 @@ SAVE_LAST_FREQ=${SAVE_LAST_FREQ:-5}
 LOG_FREQ=${LOG_FREQ:-50}
 ONLINE_EVAL=${ONLINE_EVAL:-1}
 
+CUDA_VISIBLE_DEVICES="${GPU}" python -c "import torch; assert torch.cuda.is_available(), 'CUDA is unavailable'; print('GPU:', torch.cuda.get_device_name(0), 'capability:', torch.cuda.get_device_capability(0), 'torch:', torch.__version__, 'CUDA:', torch.version.cuda)"
+
 if [[ ! -d "${DATA_PATH}/Drop" || ! -d "${DATA_PATH}/Clear" ]]; then
   echo "Missing training folders: ${DATA_PATH}/Drop and ${DATA_PATH}/Clear" >&2
+  exit 1
+fi
+
+if [[ ! -d "${VAL_DATA_PATH}/Drop" || ! -d "${VAL_DATA_PATH}/Clear" ]]; then
+  echo "Missing validation folders: ${VAL_DATA_PATH}/Drop and ${VAL_DATA_PATH}/Clear" >&2
   exit 1
 fi
 
@@ -48,8 +54,9 @@ if [[ ! -d "${CKPT}" ]]; then
 fi
 
 if [[ ! -f "${SCENE_TRAIN_PATH}" ]]; then
-  echo "Warning: scene label file not found: ${SCENE_TRAIN_PATH}" >&2
-  echo "The two scene experiments will fail unless this path is corrected." >&2
+  echo "Missing scene label file: ${SCENE_TRAIN_PATH}" >&2
+  echo "Generate it with: python data_tools.py pseudo-scene --data-root ${DATA_PATH}" >&2
+  exit 1
 fi
 
 online_eval_args=()
@@ -74,13 +81,13 @@ run_exp() {
 
   echo "============================================================"
   echo "[Ablation] ${name}"
-  echo "GPUs=${GPUS}, batch_per_gpu=${BATCH_SIZE}, global_batch=$((BATCH_SIZE * NPROC))"
+  echo "GPU=${GPU}, batch=${BATCH_SIZE}, lr=${LR}"
   echo "use_scene_dataset=${use_scene}, use_bg_subnet=${use_head}"
   echo "Output: ${output_dir}"
   echo "============================================================"
 
-  CUDA_VISIBLE_DEVICES="${GPUS}" torchrun \
-    --nproc_per_node="${NPROC}" \
+  CUDA_VISIBLE_DEVICES="${GPU}" torchrun \
+    --nproc_per_node=1 \
     --master_port="${port}" \
     main_jit.py \
     --model "${MODEL}" \
@@ -113,4 +120,4 @@ run_exp "b16_scene_no_head"    1 0 "$((MASTER_PORT_BASE + 1))"
 run_exp "b16_no_scene_head"    0 1 "$((MASTER_PORT_BASE + 2))"
 run_exp "b16_scene_head"       1 1 "$((MASTER_PORT_BASE + 3))"
 
-echo "All four RTX 6000 ablation runs finished."
+echo "All four RTX 5090 ablation runs finished."

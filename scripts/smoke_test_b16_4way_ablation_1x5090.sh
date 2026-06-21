@@ -1,36 +1,37 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# End-to-end smoke test for the four JiT-B/16 ablation settings on
-# 2 x RTX 6000 48GB. Each setting runs two epochs with one train iteration
-# per epoch. Epoch 1 activates LPIPS and tests its backward-memory peak.
+# Memory and functional smoke test for one RTX 5090 32GB.
+# Two epochs are intentional: with total_epochs=2, epoch 1 activates LPIPS.
+# Each epoch runs one training iteration, followed by one-image validation.
 #
 # Example:
 # DATA_PATH=/data/RainDrop_Train2 \
 # CKPT=/data/jit-b-16 \
 # SCENE_TRAIN_PATH=/data/RainDrop_Train2/Drop_scen_pred.json \
-# bash scripts/smoke_test_b16_4way_ablation_2xrtx6000_48g.sh
+# bash scripts/smoke_test_b16_4way_ablation_1x5090.sh
 
-GPUS=${GPUS:-0,1}
-NPROC=${NPROC:-2}
-MASTER_PORT_BASE=${MASTER_PORT_BASE:-29910}
+GPU=${GPU:-0}
+MASTER_PORT_BASE=${MASTER_PORT_BASE:-30110}
+export PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}
 
-DATA_PATH=${DATA_PATH:-/scrinvme/huilin/tp/eccv_dn/RainDrop_Train}
+DATA_PATH=${DATA_PATH:-/data/RainDrop_Train2}
 VAL_DATA_PATH=${VAL_DATA_PATH:-${DATA_PATH}}
-CKPT=${CKPT:-/scrinvme/huilin/tp/eccv_dn//jit-b-16}
-OUT_ROOT=${OUT_ROOT:-run/train_smoke/jit_b16_2xrtx6000_smoke}
+CKPT=${CKPT:-/data/jit-b-16}
+OUT_ROOT=${OUT_ROOT:-/tmp/jit_b16_1x5090_smoke}
 
 SCENE_TRAIN_PATH=${SCENE_TRAIN_PATH:-${DATA_PATH}/Drop_scen_pred.json}
 SCENE_VAL_PATH=${SCENE_VAL_PATH:-${SCENE_TRAIN_PATH}}
 
 MODEL=${MODEL:-JiT-B/16}
 IMG_SIZE=${IMG_SIZE:-256}
-BATCH_SIZE=${BATCH_SIZE:-64}
-LR=${LR:-1e-4}
+BATCH_SIZE=${BATCH_SIZE:-32}
+LR=${LR:-2.5e-5}
 NUM_WORKERS=${NUM_WORKERS:-2}
-MAX_TRAIN_STEPS=${MAX_TRAIN_STEPS:-1}
 EVAL_NUM_IMAGES=${EVAL_NUM_IMAGES:-1}
 NUM_SAMPLING_STEPS=${NUM_SAMPLING_STEPS:-1}
+
+CUDA_VISIBLE_DEVICES="${GPU}" python -c "import torch; assert torch.cuda.is_available(), 'CUDA is unavailable'; x=torch.randn(256,256,device='cuda',dtype=torch.bfloat16); print('GPU:', torch.cuda.get_device_name(0), 'BF16 test:', float((x@x).mean()))"
 
 if [[ ! -d "${DATA_PATH}/Drop" || ! -d "${DATA_PATH}/Clear" ]]; then
   echo "Missing training folders: ${DATA_PATH}/Drop and ${DATA_PATH}/Clear" >&2
@@ -49,7 +50,6 @@ fi
 
 if [[ ! -f "${SCENE_TRAIN_PATH}" ]]; then
   echo "Missing scene label file: ${SCENE_TRAIN_PATH}" >&2
-  echo "Generate it with: python data_tools.py pseudo-scene --data-root ${DATA_PATH}" >&2
   exit 1
 fi
 
@@ -69,15 +69,12 @@ run_smoke() {
   fi
 
   echo "============================================================"
-  echo "[Smoke] ${name}"
-  echo "use_scene_dataset=${use_scene}, use_bg_subnet=${use_head}"
+  echo "[Smoke] ${name}: scene=${use_scene}, head=${use_head}"
   echo "Epoch 0 tests normal loss; epoch 1 tests LPIPS backward."
-  echo "train_steps_per_epoch=${MAX_TRAIN_STEPS}, eval_images=${EVAL_NUM_IMAGES}"
-  echo "Output: ${output_dir}"
   echo "============================================================"
 
-  CUDA_VISIBLE_DEVICES="${GPUS}" torchrun \
-    --nproc_per_node="${NPROC}" \
+  CUDA_VISIBLE_DEVICES="${GPU}" torchrun \
+    --nproc_per_node=1 \
     --master_port="${port}" \
     main_jit.py \
     --model "${MODEL}" \
@@ -91,7 +88,7 @@ run_smoke() {
     --eval_epoch 1 \
     --eval_num_images "${EVAL_NUM_IMAGES}" \
     --num_sampling_steps "${NUM_SAMPLING_STEPS}" \
-    --max_train_steps "${MAX_TRAIN_STEPS}" \
+    --max_train_steps 1 \
     --cfg 1.0 \
     --num_workers "${NUM_WORKERS}" \
     --save_last_freq 1 \
@@ -106,10 +103,9 @@ run_smoke() {
     "${scene_args[@]}"
 
   if [[ ! -f "${output_dir}/checkpoint-last.pth" ]]; then
-    echo "Smoke test failed: checkpoint-last.pth was not created for ${name}" >&2
+    echo "Smoke test failed: no checkpoint for ${name}" >&2
     exit 1
   fi
-
   echo "[PASS] ${name}"
 }
 
@@ -118,4 +114,4 @@ run_smoke "b16_scene_no_head"    1 0 "$((MASTER_PORT_BASE + 1))"
 run_smoke "b16_no_scene_head"    0 1 "$((MASTER_PORT_BASE + 2))"
 run_smoke "b16_scene_head"       1 1 "$((MASTER_PORT_BASE + 3))"
 
-echo "All four RTX 6000 smoke tests passed, including LPIPS backward."
+echo "All four RTX 5090 smoke tests passed, including LPIPS backward."
