@@ -47,10 +47,11 @@ HISTORY_FIELDS = [
 
 def parse_args():
     parser = argparse.ArgumentParser("Generate a JiT raindrop-removal submission")
-    parser.add_argument("--input-dir", required=True, help="Test Drop directory; nested images are supported")
-    parser.add_argument("--checkpoint", required=True, help="Checkpoint .pth file or directory")
-    parser.add_argument("--output-root", default="run/submissions")
-    parser.add_argument("--history-csv", default="", help="Default: output-root/submission_history.csv")
+    parser.add_argument("--input-dir", default=r"D:\zhl\data\eccv_dn\Drop", help="Test Drop directory; nested images are supported")
+    parser.add_argument("--checkpoint", default=r"D:\zhl\project\JiT\run\ablation_b16_1x5090\b16_no_scene_no_head\16", help="Checkpoint .pth file or directory")
+    parser.add_argument("--ckpt_type", default='last', choices=['last', 'best'])
+    parser.add_argument("--output-root", default="submissions")
+    parser.add_argument("--history-csv", default="submissions/submission_history.csv", help="Default: output-root/submission_history.csv")
     parser.add_argument("--model-name", default="", help="Used in model_timestamp.zip")
     parser.add_argument("--model", default="", help="Default: read from checkpoint, otherwise JiT-B/16")
     parser.add_argument("--state-key", default="auto", choices=["auto", "model_ema1", "model_ema2", "model"])
@@ -77,16 +78,19 @@ def load_checkpoint(path):
         return torch.load(path, map_location="cpu")
 
 
-def resolve_checkpoint(path):
+def resolve_checkpoint(path, ckpt_type):
+    ckpt_type = ckpt_type.lower()
     path = Path(path)
     if path.is_file():
         return path
     if not path.is_dir():
         raise FileNotFoundError(f"Checkpoint path does not exist: {path}")
-    for name in ("checkpoint-best.pth", "checkpoint-last.pth"):
-        candidate = path / name
-        if candidate.exists():
-            return candidate
+    if ckpt_type == 'best':
+        candidate = path / "checkpoint-best.pth"
+    if ckpt_type == 'last':
+        candidate = path / "checkpoint-last.pth"
+    if candidate.exists():
+        return candidate
     raise FileNotFoundError(f"No checkpoint-best.pth or checkpoint-last.pth under {path}")
 
 
@@ -265,7 +269,7 @@ def append_history(path, row):
 def main():
     cli = parse_args()
     device = torch.device(cli.device if torch.cuda.is_available() else "cpu")
-    checkpoint_path = resolve_checkpoint(cli.checkpoint)
+    checkpoint_path = resolve_checkpoint(cli.checkpoint, cli.ckpt_type)
     checkpoint = load_checkpoint(checkpoint_path)
     state_key, state_dict = choose_state_dict(checkpoint, cli.state_key)
 
@@ -292,7 +296,7 @@ def main():
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     model_name = sanitize_name(cli.model_name or default_model_name(checkpoint_path))
-    run_name = f"{model_name}_{timestamp}"
+    run_name = f"{model_name}_{cli.ckpt_type}_{timestamp}"
     output_root = Path(cli.output_root)
     image_dir = output_root / run_name
     archive_path = output_root / f"{run_name}.zip"

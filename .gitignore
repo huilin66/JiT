@@ -5,7 +5,9 @@ __pycache__/
 demo/
 ckpt/
 run/
+submissions/
 
+*.zip
 *.pth
 *.csv
 *.json

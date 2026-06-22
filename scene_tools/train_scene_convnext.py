@@ -26,13 +26,13 @@ from scene_convnext import (
 
 def parse_args():
     parser = argparse.ArgumentParser("Train ConvNeXt scene classifier")
-    parser.add_argument("--data-root", required=True, help="Root containing Drop and Drop_scen_pred.json")
+    parser.add_argument("--data-root", default=r"D:\zhl\data\eccv_dn\RainDrop_Train", help="Root containing Drop and Drop_scen_pred.json")
     parser.add_argument("--image-dir", default="", help="Default: data-root/Drop")
     parser.add_argument("--labels-json", default="", help="Default: data-root/Drop_scen_pred.json")
     parser.add_argument("--output-dir", default="run/scene_convnext")
     parser.add_argument("--model", default="convnext_tiny")
-    parser.add_argument("--image-size", type=int, default=224)
-    parser.add_argument("--epochs", type=int, default=30)
+    parser.add_argument("--image-size", type=int, default=448)
+    parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--weight-decay", type=float, default=1e-4)
