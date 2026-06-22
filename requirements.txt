@@ -6,3 +6,4 @@ lpips
 torch_fidelity
 piq
 pytorch_msssim
+timm==0.9.12
