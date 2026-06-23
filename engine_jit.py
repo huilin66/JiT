@@ -89,6 +89,9 @@ def train_one_epoch(
         model_without_ddp.update_ema()
 
         metric_logger.update(loss=loss_value)
+        if hasattr(criterion, "latest_terms"):
+            for term_name, term_value in criterion.latest_terms.items():
+                metric_logger.update(**{f"loss_{term_name}": float(term_value.item())})
         lr = optimizer.param_groups[0]["lr"]
         metric_logger.update(lr=lr)
 
@@ -100,6 +103,13 @@ def train_one_epoch(
             if data_iter_step % args.log_freq == 0:
                 log_writer.add_scalar("train_loss", loss_value_reduce, epoch_1000x)
                 log_writer.add_scalar("lr", lr, epoch_1000x)
+                if hasattr(criterion, "latest_terms"):
+                    for term_name, term_value in criterion.latest_terms.items():
+                        log_writer.add_scalar(
+                            f"train_loss_{term_name}",
+                            float(term_value.item()),
+                            epoch_1000x,
+                        )
 
         if args.max_train_steps > 0 and data_iter_step + 1 >= args.max_train_steps:
             print(f"Reached max_train_steps={args.max_train_steps}; stopping epoch early.")

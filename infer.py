@@ -13,6 +13,53 @@ from main_jit import get_args_parser
 from scene_predicter import batch_predict_and_save
 
 
+def _checkpoint_arg(checkpoint, name, default):
+    saved_args = checkpoint.get("args")
+    return getattr(saved_args, name, default) if saved_args is not None else default
+
+
+def _load_checkpoint(path):
+    try:
+        return torch.load(path, map_location="cpu", weights_only=False)
+    except TypeError:
+        return torch.load(path, map_location="cpu")
+
+
+def _configure_refiner_from_checkpoint(args, checkpoint, state_dict):
+    has_refiner = any(key.startswith("detail_refiner.") for key in state_dict)
+    args.use_detail_refiner = int(has_refiner)
+    args.freeze_jit = int(has_refiner)
+    if not has_refiner:
+        return False
+
+    stem_weight = state_dict.get("detail_refiner.stem_1x.weight")
+    inferred_dim = int(stem_weight.shape[0]) if stem_weight is not None else 32
+    block_indices = {
+        key.split(".")[2]
+        for key in state_dict
+        if key.startswith("detail_refiner.blocks_1x.")
+        and len(key.split(".")) > 2
+        and key.split(".")[2].isdigit()
+    }
+    args.refiner_base_dim = int(
+        _checkpoint_arg(checkpoint, "refiner_base_dim", inferred_dim)
+    )
+    args.refiner_num_blocks = int(
+        _checkpoint_arg(checkpoint, "refiner_num_blocks", len(block_indices) or 2)
+    )
+    args.refiner_use_frequency = int(
+        _checkpoint_arg(
+            checkpoint,
+            "refiner_use_frequency",
+            any(".frequency." in key for key in state_dict),
+        )
+    )
+    args.refiner_max_residual = float(
+        _checkpoint_arg(checkpoint, "refiner_max_residual", 0.25)
+    )
+    return True
+
+
 def img_process(img_path, patch_size=256, stride=128):
     img_pil = Image.open(img_path).convert("RGB")
     W, H = img_pil.size
@@ -160,11 +207,7 @@ def batch_predict(
                 scene_model_path, input_dir, scene_pred_path
             )
 
-    args = get_args_parser().parse_args()
-    args.use_bg_subnet = use_bg_subnet
-    args.model = 'JiT-B/16'
-    model = Denoiser(args)
-    checkpoint = torch.load(ckpt_path, map_location="cpu")
+    checkpoint = _load_checkpoint(ckpt_path)
 
     # 💥 重点修复：你的 checkpoint 里存的叫 'model_ema1'，不是 'model_ema'！
     if "model_ema1" in checkpoint:
@@ -174,8 +217,16 @@ def batch_predict(
         state_dict = checkpoint["model"]
         print("cannot find EMA weight model, use source weight")
 
+    args = get_args_parser().parse_args()
+    args.use_bg_subnet = use_bg_subnet
+    args.model = _checkpoint_arg(checkpoint, "model", "JiT-B/16")
+    args.img_size = int(_checkpoint_arg(checkpoint, "img_size", args.img_size))
+    args.class_num = int(_checkpoint_arg(checkpoint, "class_num", args.class_num))
+    has_refiner = _configure_refiner_from_checkpoint(args, checkpoint, state_dict)
+    model = Denoiser(args)
     model.load_state_dict(state_dict)
     model.to(device).eval()
+    print(f"MSDT detail refiner: {has_refiner}")
 
     files = [f for f in os.listdir(input_dir) if f.endswith((".jpg", ".png", ".jpeg"))]
 

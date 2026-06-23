@@ -121,6 +121,26 @@ def infer_has_bg_subnet(state_dict):
     return any("bg_subnet" in key for key in state_dict)
 
 
+def infer_has_detail_refiner(state_dict):
+    return any(key.startswith("detail_refiner.") for key in state_dict)
+
+
+def infer_refiner_base_dim(state_dict, fallback=32):
+    weight = state_dict.get("detail_refiner.stem_1x.weight")
+    return int(weight.shape[0]) if weight is not None else fallback
+
+
+def infer_refiner_num_blocks(state_dict, fallback=2):
+    indices = set()
+    prefix = "detail_refiner.blocks_1x."
+    for key in state_dict:
+        if key.startswith(prefix):
+            block_index = key[len(prefix):].split(".", 1)[0]
+            if block_index.isdigit():
+                indices.add(int(block_index))
+    return len(indices) or fallback
+
+
 def sanitize_name(name):
     name = re.sub(r"[^A-Za-z0-9._-]+", "_", name.strip())
     return name.strip("._-") or "jit"
@@ -277,6 +297,7 @@ def main():
     img_size = cli.img_size or int(checkpoint_arg(checkpoint, "img_size", 256))
     class_num = cli.class_num or infer_class_num(state_dict, int(checkpoint_arg(checkpoint, "class_num", 1000)))
     has_bg_subnet = infer_has_bg_subnet(state_dict) if cli.use_bg_subnet == "auto" else cli.use_bg_subnet == "1"
+    has_detail_refiner = infer_has_detail_refiner(state_dict)
     if cli.stride <= 0 or cli.stride > img_size:
         raise ValueError(f"stride must be in [1, {img_size}]")
 
@@ -288,6 +309,32 @@ def main():
     model_args.img_size = img_size
     model_args.class_num = class_num
     model_args.use_bg_subnet = int(has_bg_subnet)
+    model_args.use_detail_refiner = int(has_detail_refiner)
+    model_args.freeze_jit = int(has_detail_refiner)
+    model_args.refiner_base_dim = int(
+        checkpoint_arg(
+            checkpoint,
+            "refiner_base_dim",
+            infer_refiner_base_dim(state_dict),
+        )
+    )
+    model_args.refiner_num_blocks = int(
+        checkpoint_arg(
+            checkpoint,
+            "refiner_num_blocks",
+            infer_refiner_num_blocks(state_dict),
+        )
+    )
+    model_args.refiner_use_frequency = int(
+        checkpoint_arg(
+            checkpoint,
+            "refiner_use_frequency",
+            any(".frequency." in key for key in state_dict),
+        )
+    )
+    model_args.refiner_max_residual = float(
+        checkpoint_arg(checkpoint, "refiner_max_residual", 0.25)
+    )
     model_args.num_sampling_steps = cli.steps
     model_args.cfg = 1.0
     model = Denoiser(model_args)
@@ -304,7 +351,10 @@ def main():
     image_dir.mkdir(parents=True, exist_ok=False)
 
     print(f"Checkpoint: {checkpoint_path}")
-    print(f"State: {state_key}; model: {architecture}; scene: {cli.use_scene}; head: {has_bg_subnet}")
+    print(
+        f"State: {state_key}; model: {architecture}; scene: {cli.use_scene}; "
+        f"head: {has_bg_subnet}; MSDT refiner: {has_detail_refiner}"
+    )
     print(f"Images: {len(image_files)}; device: {device}; output: {archive_path}")
     started = time.perf_counter()
     for image_path in tqdm(image_files, desc="JiT submission inference"):
@@ -346,7 +396,10 @@ def main():
             "ssim_y": "",
             "lpips": "",
             "score": "",
-            "notes": cli.notes,
+            "notes": (
+                f"detail_refiner={int(has_detail_refiner)}"
+                + (f"; {cli.notes}" if cli.notes else "")
+            ),
         },
     )
     if cli.remove_images_after_zip:
