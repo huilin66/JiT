@@ -20,7 +20,7 @@ CKPT=${CKPT:-/scrinvme/huilin/bdd/cp_data/raindrop_remove_2026/jit-b-16}
 OUT_ROOT=${OUT_ROOT:-run/train/ablation_b16_3x3090}
 
 # Optional scene-label json/csv. If empty, dataset.py falls back to its historical default path.
-SCENE_TRAIN_PATH=${SCENE_TRAIN_PATH:-}
+SCENE_TRAIN_PATH=${SCENE_TRAIN_PATH:-${DATA_PATH}/Drop_scen_pred.json}
 SCENE_VAL_PATH=${SCENE_VAL_PATH:-${SCENE_TRAIN_PATH}}
 
 MODEL=${MODEL:-JiT-B/16}
@@ -36,6 +36,7 @@ NUM_SAMPLING_STEPS=${NUM_SAMPLING_STEPS:-1}
 SAVE_LAST_FREQ=${SAVE_LAST_FREQ:-5}
 LOG_FREQ=${LOG_FREQ:-50}
 ONLINE_EVAL=${ONLINE_EVAL:-1}
+RESUME_OPTIMIZER=${RESUME_OPTIMIZER:-0}
 
 scene_args=()
 if [[ -n "${SCENE_TRAIN_PATH}" ]]; then
@@ -87,6 +88,7 @@ run_exp() {
     --data_path "${DATA_PATH}" \
     --val_data_path "${VAL_DATA_PATH}" \
     --resume "${CKPT}" \
+    --resume_optimizer "${RESUME_OPTIMIZER}" \
     "${scene_args[@]}" \
     "${online_eval_args[@]}"
 }

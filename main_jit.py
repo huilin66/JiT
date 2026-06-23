@@ -55,6 +55,13 @@ def set_seed(seed=42):
     # torch.use_deterministic_algorithms(True)
 
 
+def load_checkpoint(path):
+    try:
+        return torch.load(path, map_location="cpu", weights_only=False)
+    except TypeError:
+        return torch.load(path, map_location="cpu")
+
+
 def get_args_parser():
     parser = argparse.ArgumentParser("JiT", add_help=False)
 
@@ -74,6 +81,22 @@ def get_args_parser():
         "--proj_dropout", type=float, default=0.0, help="Projection dropout rate"
     )
     parser.add_argument("--use_bg_subnet", type=int, default=0, help="use_bg_subnet")
+    parser.add_argument(
+        "--use_detail_refiner",
+        type=int,
+        default=0,
+        help="Run an MSDT-style detail refiner once after the JiT ODE endpoint.",
+    )
+    parser.add_argument(
+        "--freeze_jit",
+        type=int,
+        default=0,
+        help="Freeze JiT while training the post-ODE detail refiner.",
+    )
+    parser.add_argument("--refiner_base_dim", type=int, default=32)
+    parser.add_argument("--refiner_num_blocks", type=int, default=2)
+    parser.add_argument("--refiner_use_frequency", type=int, default=1)
+    parser.add_argument("--refiner_max_residual", type=float, default=0.25)
     parser.add_argument(
         "--use_scene_dataset", type=int, default=0, help="use_scene_dataset"
     )
@@ -144,6 +167,8 @@ def get_args_parser():
     parser.add_argument("--noise_scale", default=1.0, type=float)
     parser.add_argument("--t_eps", default=5e-2, type=float)
     parser.add_argument("--label_drop_prob", default=0.1, type=float)
+    parser.add_argument("--loss_edge_weight", default=0.0, type=float)
+    parser.add_argument("--loss_freq_weight", default=0.0, type=float)
 
     parser.add_argument("--seed", default=0, type=int)
     parser.add_argument(
@@ -214,6 +239,18 @@ def get_args_parser():
         "--resume", default="", help="Folder that contains checkpoint to resume from"
     )
     parser.add_argument(
+        "--resume_optimizer",
+        type=int,
+        default=1,
+        help="Restore optimizer and epoch from --resume. Use 0 when initializing a refiner from a JiT checkpoint.",
+    )
+    parser.add_argument(
+        "--resume_state_key",
+        choices=("model", "model_ema1", "model_ema2"),
+        default="model",
+        help="Checkpoint state used to initialize online model weights.",
+    )
+    parser.add_argument(
         "--save_last_freq",
         type=int,
         default=5,
@@ -241,6 +278,11 @@ def main(args):
     misc.init_distributed_mode(args)
     print("Job directory:", os.path.dirname(os.path.realpath(__file__)))
     print("Arguments:\n{}".format(args).replace(", ", ",\n"))
+
+    if args.use_detail_refiner and not args.resume:
+        raise ValueError(
+            "MSDT refiner training requires --resume to point to a trained JiT checkpoint"
+        )
 
     device = torch.device(args.device)
 
@@ -281,7 +323,7 @@ def main(args):
             rain_dir=os.path.join(args.data_path, "Drop"),
             clean_dir=os.path.join(args.data_path, "Clear"),
             transform=transform_train,
-            scene_path=args.scene_train_path or None,
+            scene_path=args.scene_train_path,
         )
 
     sampler_train = torch.utils.data.DistributedSampler(
@@ -367,36 +409,71 @@ def main(args):
         target_w_rec=1.0,
         target_w_ssim=1.0,  # 对应指标公式的 10
         target_w_lpips=0.5,  # 对应指标公式的 5
+        target_w_edge=args.loss_edge_weight,
+        target_w_freq=args.loss_freq_weight,
         total_epochs=args.epochs,
     )
 
-    checkpoint_path = (
-        os.path.join(args.resume, "checkpoint-last.pth") if args.resume else None
-    )
-    if checkpoint_path and os.path.exists(checkpoint_path):
-        checkpoint = torch.load(checkpoint_path, map_location="cpu")
-        model_without_ddp.load_state_dict(checkpoint["model"], strict=False)
+    checkpoint_path = None
+    if args.resume:
+        checkpoint_path = (
+            args.resume
+            if os.path.isfile(args.resume)
+            else os.path.join(args.resume, "checkpoint-last.pth")
+        )
+        if not os.path.exists(checkpoint_path):
+            raise FileNotFoundError(
+                f"Requested checkpoint does not exist: {checkpoint_path}"
+            )
+    if checkpoint_path:
+        checkpoint = load_checkpoint(checkpoint_path)
+        if args.resume_state_key not in checkpoint:
+            raise KeyError(
+                f"Checkpoint {checkpoint_path} has no state '{args.resume_state_key}'"
+            )
+        incompatible = model_without_ddp.load_state_dict(
+            checkpoint[args.resume_state_key], strict=False
+        )
+        if incompatible.missing_keys:
+            print(
+                "Initialized checkpoint-missing parameters from the current model: "
+                + ", ".join(incompatible.missing_keys[:8])
+            )
+        if incompatible.unexpected_keys:
+            print(
+                "Ignored checkpoint-only parameters: "
+                + ", ".join(incompatible.unexpected_keys[:8])
+            )
 
-        ema_state_dict1 = checkpoint["model_ema1"]
-        ema_state_dict2 = checkpoint["model_ema2"]
+        current_state = model_without_ddp.state_dict()
+        ema_state_dict1 = checkpoint.get("model_ema1", checkpoint["model"])
+        ema_state_dict2 = checkpoint.get("model_ema2", checkpoint["model"])
+
+        def restore_ema_parameter(ema_state, name):
+            saved = ema_state.get(name)
+            current = current_state[name]
+            if saved is None or saved.shape != current.shape:
+                return current.detach().clone().to(device)
+            return saved.detach().clone().to(device)
+
         model_without_ddp.ema_params1 = [
-            ema_state_dict1[name].to(device)
-            if "bg_subnet" not in name
-            else model_without_ddp.state_dict()[name]
+            restore_ema_parameter(ema_state_dict1, name)
             for name, _ in model_without_ddp.named_parameters()
         ]
         model_without_ddp.ema_params2 = [
-            ema_state_dict2[name].to(device)
-            if "bg_subnet" not in name
-            else model_without_ddp.state_dict()[name]
+            restore_ema_parameter(ema_state_dict2, name)
             for name, _ in model_without_ddp.named_parameters()
         ]
-        print("Resumed checkpoint from", args.resume)
+        print(
+            f"Loaded {args.resume_state_key} checkpoint weights from {checkpoint_path}"
+        )
 
-        if "optimizer" in checkpoint and "epoch" in checkpoint:
+        if args.resume_optimizer and "optimizer" in checkpoint and "epoch" in checkpoint:
             optimizer.load_state_dict(checkpoint["optimizer"])
             args.start_epoch = checkpoint["epoch"] + 1
-            print("Loaded optimizer & scaler state!")
+            print("Loaded optimizer state and resumed epoch")
+        elif not args.resume_optimizer:
+            print("Loaded model weights only; optimizer and epoch were reset")
         del checkpoint
     else:
         model_without_ddp.ema_params1 = copy.deepcopy(

@@ -31,19 +31,6 @@ class PairedRainDataset(Dataset):
         dummy_labels = torch.zeros(1, dtype=torch.long)
         return rain_img, clean_img, dummy_labels
 
-        # seed = random.randint(0, 2147483647)
-        #
-        # if self.transform:
-        #     random.seed(seed)
-        #     torch.manual_seed(seed)
-        #     rain_img = self.transform(rain_img)
-        #
-        #     random.seed(seed)
-        #     torch.manual_seed(seed)
-        #     clean_img = self.transform(clean_img)
-        #
-        # return rain_img, clean_img
-
 
 class ScenePairedRainDataset(Dataset):
     def __init__(self, rain_dir, clean_dir, transform=None, scene_path=None):
@@ -56,7 +43,7 @@ class ScenePairedRainDataset(Dataset):
         self.scene_info = self._get_scene()
 
     def _get_scene(self):
-        scene_path = self.scene_path or r"/scrinvme/huilin/bdd/cp_data/raindrop_remove_2026/record.csv"
+        scene_path = self.scene_path
         df = pd.read_csv(scene_path, header=0, index_col=False)
         df["folder_name"] = df["folder_name"].astype(str).str.zfill(5)
 
@@ -110,7 +97,7 @@ class ScenePairedRainDatasetV2(Dataset):
         self.scene_info = self._get_scene()
 
     def _get_scene(self):
-        scene_path = self.scene_path or r"/scrinvme/huilin/bdd/cp_data/raindrop_remove_2026/RainDrop_Train2/Drop_scen_pred.json"
+        scene_path = self.scene_path
         with open(scene_path, "r") as f:
             scene_info = json.load(f)
 
@@ -200,7 +187,7 @@ class SceneValPatchDataset(Dataset):
         self.scene_info = self._get_scene()
 
     def _get_scene(self):
-        scene_path = self.scene_path or r"/scrinvme/huilin/bdd/cp_data/raindrop_remove_2026/record.csv"
+        scene_path = self.scene_path
         df = pd.read_csv(scene_path, header=0, index_col=False)
         df["folder_name"] = df["folder_name"].astype(str).str.zfill(5)
 
@@ -279,7 +266,7 @@ class SceneValPatchDatasetV2(Dataset):
         self.scene_info = self._get_scene()
 
     def _get_scene(self):
-        scene_path = self.scene_path or r"/scrinvme/huilin/bdd/cp_data/raindrop_remove_2026/RainDrop_Train2/Drop_scen_pred.json"
+        scene_path = self.scene_path
         with open(scene_path, "r") as f:
             scene_info = json.load(f)
 

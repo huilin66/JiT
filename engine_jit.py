@@ -89,6 +89,9 @@ def train_one_epoch(
         model_without_ddp.update_ema()
 
         metric_logger.update(loss=loss_value)
+        if hasattr(criterion, "latest_terms"):
+            for term_name, term_value in criterion.latest_terms.items():
+                metric_logger.update(**{f"loss_{term_name}": float(term_value.item())})
         lr = optimizer.param_groups[0]["lr"]
         metric_logger.update(lr=lr)
 
@@ -100,6 +103,13 @@ def train_one_epoch(
             if data_iter_step % args.log_freq == 0:
                 log_writer.add_scalar("train_loss", loss_value_reduce, epoch_1000x)
                 log_writer.add_scalar("lr", lr, epoch_1000x)
+                if hasattr(criterion, "latest_terms"):
+                    for term_name, term_value in criterion.latest_terms.items():
+                        log_writer.add_scalar(
+                            f"train_loss_{term_name}",
+                            float(term_value.item()),
+                            epoch_1000x,
+                        )
 
         if args.max_train_steps > 0 and data_iter_step + 1 >= args.max_train_steps:
             print(f"Reached max_train_steps={args.max_train_steps}; stopping epoch early.")
@@ -111,7 +121,7 @@ def evaluate_best_metric(
     model_without_ddp, data_loader_val, device, pure_val=False, steps=10
 ):
     """
-    计算综合得分: PSNR + 10*SSIM - 5*LPIPS
+    计算综合得分: 10*PSNR + 10*SSIM - 5*LPIPS
     得分越高，说明画质越好。
     """
     global lpips_vgg
@@ -158,7 +168,7 @@ def evaluate_best_metric(
         val_psnr = -10 * torch.log10(mse + 1e-8).mean().item()
         val_ssim = ssim(pred_y, target_y, data_range=1.0).item()
 
-        composite_score = val_psnr + 10.0 * val_ssim - 5.0 * val_lpips
+        composite_score = 10.0 * val_psnr + 10.0 * val_ssim - 5.0 * val_lpips
 
         total_scores["score"] += composite_score * x.size(0)
         total_scores["psnr"] += val_psnr * x.size(0)

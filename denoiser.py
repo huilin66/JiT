@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from model_jit import JiT_models
+from model_msdt_refiner import MSDTDetailRefiner
 
 class Denoiser(nn.Module):
     def __init__(
@@ -18,6 +19,30 @@ class Denoiser(nn.Module):
         )
         self.img_size = args.img_size
         self.num_classes = args.class_num
+
+        self.use_detail_refiner = bool(getattr(args, "use_detail_refiner", 0))
+        self.freeze_jit = bool(getattr(args, "freeze_jit", 0))
+        if self.freeze_jit and not self.use_detail_refiner:
+            raise ValueError("--freeze_jit 1 requires --use_detail_refiner 1")
+        if self.use_detail_refiner and not self.freeze_jit:
+            raise ValueError(
+                "MSDT detail-refiner training requires --freeze_jit 1 so JiT "
+                "remains a fixed clean-image predictor."
+            )
+        if self.use_detail_refiner:
+            self.detail_refiner = MSDTDetailRefiner(
+                in_channels=3,
+                base_dim=getattr(args, "refiner_base_dim", 32),
+                num_blocks=getattr(args, "refiner_num_blocks", 2),
+                use_frequency=bool(getattr(args, "refiner_use_frequency", 1)),
+                max_residual=getattr(args, "refiner_max_residual", 0.25),
+            )
+        else:
+            self.detail_refiner = None
+
+        if self.freeze_jit:
+            self.net.requires_grad_(False)
+            self.net.eval()
 
         self.label_drop_prob = args.label_drop_prob
         self.P_mean = args.P_mean
@@ -37,6 +62,19 @@ class Denoiser(nn.Module):
         self.cfg_scale = args.cfg
         self.cfg_interval = (args.interval_min, args.interval_max)
 
+    def train(self, mode=True):
+        super().train(mode)
+        if self.freeze_jit:
+            # The frozen JiT must produce a stable ODE endpoint while the
+            # refiner is training, even when the enclosing Denoiser is in train mode.
+            self.net.eval()
+        return self
+
+    def _prepare_labels(self, x, dummy_labels):
+        if dummy_labels is None:
+            return torch.zeros(x.size(0), dtype=torch.long, device=x.device)
+        return dummy_labels.squeeze(-1).view(-1).to(device=x.device, dtype=torch.long)
+
     def drop_labels(self, labels):
         drop = torch.rand(labels.shape[0], device=labels.device) < self.label_drop_prob
         out = torch.where(drop, torch.full_like(labels, self.num_classes), labels)
@@ -50,10 +88,17 @@ class Denoiser(nn.Module):
         """
         注意：现在 forward 需要同时接收带雨图和干净图！
         """
-        if dummy_labels is None:
-            dummy_labels = torch.zeros(x_rainy.size(0), dtype=torch.long, device=x_rainy.device)
-        else:
-            dummy_labels = dummy_labels.squeeze(-1)
+        dummy_labels = self._prepare_labels(x_rainy, dummy_labels)
+
+        if self.use_detail_refiner:
+            # Stage-2 training: JiT completes the ODE without retaining its
+            # graph, then MSDT runs exactly once and receives all gradients.
+            jit_prediction = self._generate_i2i_base(
+                x_rainy,
+                steps=self.steps,
+                dummy_labels=dummy_labels,
+            )
+            return self.detail_refiner(x_rainy, jit_prediction)
         # 1. 随机采样时间步 t (范围 0~1)
         # t=0 代表完全是雨图，t=1 代表完全是干净图
         t = torch.rand(x_rainy.size(0), device=x_rainy.device).view(-1, *([1] * (x_rainy.ndim - 1)))
@@ -87,17 +132,13 @@ class Denoiser(nn.Module):
     # 2. 推理阶段：10步渐进式去雨 (Euler ODE 求解器)
     # ==========================================
     @torch.no_grad()
-    def generate_i2i(self, x_rainy, steps=10, dummy_labels=None):
-        """
-        在推理时调用此函数，传入带雨图和步数 (默认10步)
-        """
+    def _generate_i2i_base(self, x_rainy, steps=10, dummy_labels=None):
+        if steps < 1:
+            raise ValueError(f"steps must be at least 1, got {steps}")
         z = x_rainy.clone()
         bsz = z.size(0)
         device = z.device
-        if dummy_labels is None:
-            dummy_labels = torch.zeros(bsz, dtype=torch.long, device=device)
-        else:
-            dummy_labels = dummy_labels.squeeze(-1).view(-1)
+        dummy_labels = self._prepare_labels(z, dummy_labels)
         # 构建时间轴: 例如 steps=10 时，t 从 0.0, 0.1, 0.2 ... 到 1.0
         timesteps = torch.linspace(0.0, 1.0, steps + 1, device=device).view(-1, *([1] * z.ndim)).expand(-1, bsz, -1, -1, -1)
 
@@ -117,8 +158,19 @@ class Denoiser(nn.Module):
             # z_next = z_current + Δt * v
             z = z + (t_next - t) * v_pred
 
-        # 最终的 z 就是到达 t=1 时的干净去雨图
         return z
+
+    @torch.no_grad()
+    def generate_i2i(self, x_rainy, steps=10, dummy_labels=None):
+        """Complete the JiT ODE and optionally refine its endpoint once."""
+        jit_prediction = self._generate_i2i_base(
+            x_rainy,
+            steps=steps,
+            dummy_labels=dummy_labels,
+        )
+        if self.detail_refiner is None:
+            return jit_prediction
+        return self.detail_refiner(x_rainy, jit_prediction)
 
     @torch.no_grad()
     def generate(self, labels):
