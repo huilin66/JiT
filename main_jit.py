@@ -323,7 +323,7 @@ def main(args):
             rain_dir=os.path.join(args.data_path, "Drop"),
             clean_dir=os.path.join(args.data_path, "Clear"),
             transform=transform_train,
-            scene_path=args.scene_train_path or None,
+            scene_path=args.scene_train_path,
         )
 
     sampler_train = torch.utils.data.DistributedSampler(

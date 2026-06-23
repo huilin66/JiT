@@ -20,7 +20,7 @@ CKPT=${CKPT:-/scrinvme/huilin/bdd/cp_data/raindrop_remove_2026/jit-b-16}
 OUT_ROOT=${OUT_ROOT:-run/train/ablation_b16_3x3090}
 
 # Optional scene-label json/csv. If empty, dataset.py falls back to its historical default path.
-SCENE_TRAIN_PATH=${SCENE_TRAIN_PATH:-}
+SCENE_TRAIN_PATH=${SCENE_TRAIN_PATH:-${DATA_PATH}/Drop_scen_pred.json}
 SCENE_VAL_PATH=${SCENE_VAL_PATH:-${SCENE_TRAIN_PATH}}
 
 MODEL=${MODEL:-JiT-B/16}
