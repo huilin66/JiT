@@ -5,8 +5,17 @@ set -euo pipefail
 DATA_ROOT=${DATA_ROOT:-/root/huilin/data/eccv_dn}
 DATA_PATH=${DATA_PATH:-${DATA_ROOT}/RainDrop_Train}
 VAL_DATA_PATH=${VAL_DATA_PATH:-${DATA_PATH}}
-CKPT=${CKPT:-ckpt/jit-b-16}
+CKPT=${CKPT:-}
 OUTPUT_DIR=${OUTPUT_DIR:-run/train_smoke/jit_b16_msdt_refiner/16}
+
+if [[ -z "${CKPT}" ]]; then
+  echo "CKPT must point to a trained JiT checkpoint file or directory." >&2
+  exit 2
+fi
+if [[ ! -f "${CKPT}" && ! -f "${CKPT}/checkpoint-last.pth" ]]; then
+  echo "Cannot find checkpoint file: ${CKPT} (or ${CKPT}/checkpoint-last.pth)" >&2
+  exit 2
+fi
 
 GPUS=${GPUS:-0,1,2}
 NPROC=${NPROC:-3}

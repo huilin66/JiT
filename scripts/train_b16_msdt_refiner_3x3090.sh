@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Stage 1: load an existing JiT checkpoint, freeze JiT, and train only the
+# Refiner stage: load a trained JiT checkpoint, freeze JiT, and train only the
 # MSDT-style detail refiner. Run from the project root.
 #
 # Example:
@@ -15,8 +15,17 @@ MASTER_PORT=${MASTER_PORT:-29630}
 
 DATA_PATH=${DATA_PATH:-/scrinvme/huilin/bdd/cp_data/raindrop_remove_2026/RainDrop_Train2}
 VAL_DATA_PATH=${VAL_DATA_PATH:-${DATA_PATH}}
-CKPT=${CKPT:-/scrinvme/huilin/bdd/cp_data/raindrop_remove_2026/jit-b-16}
+CKPT=${CKPT:-}
 OUTPUT_DIR=${OUTPUT_DIR:-run/train/jit_b16_msdt_refiner_stage1/16}
+
+if [[ -z "${CKPT}" ]]; then
+  echo "CKPT must point to a trained JiT checkpoint file or directory." >&2
+  exit 2
+fi
+if [[ ! -f "${CKPT}" && ! -f "${CKPT}/checkpoint-last.pth" ]]; then
+  echo "Cannot find checkpoint file: ${CKPT} (or ${CKPT}/checkpoint-last.pth)" >&2
+  exit 2
+fi
 
 SCENE_TRAIN_PATH=${SCENE_TRAIN_PATH:-}
 SCENE_VAL_PATH=${SCENE_VAL_PATH:-${SCENE_TRAIN_PATH}}

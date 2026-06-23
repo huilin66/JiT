@@ -279,6 +279,11 @@ def main(args):
     print("Job directory:", os.path.dirname(os.path.realpath(__file__)))
     print("Arguments:\n{}".format(args).replace(", ", ",\n"))
 
+    if args.use_detail_refiner and not args.resume:
+        raise ValueError(
+            "MSDT refiner training requires --resume to point to a trained JiT checkpoint"
+        )
+
     device = torch.device(args.device)
 
     # Set seeds for reproducibility
@@ -416,7 +421,11 @@ def main(args):
             if os.path.isfile(args.resume)
             else os.path.join(args.resume, "checkpoint-last.pth")
         )
-    if checkpoint_path and os.path.exists(checkpoint_path):
+        if not os.path.exists(checkpoint_path):
+            raise FileNotFoundError(
+                f"Requested checkpoint does not exist: {checkpoint_path}"
+            )
+    if checkpoint_path:
         checkpoint = load_checkpoint(checkpoint_path)
         if args.resume_state_key not in checkpoint:
             raise KeyError(

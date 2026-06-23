@@ -15,6 +15,86 @@ from main_jit import get_args_parser
 from scene_predicter import batch_predict_and_save
 
 
+def _checkpoint_arg(checkpoint, name, default):
+    saved_args = checkpoint.get("args")
+    return getattr(saved_args, name, default) if saved_args is not None else default
+
+
+def _load_checkpoint(path):
+    try:
+        return torch.load(path, map_location="cpu", weights_only=False)
+    except TypeError:
+        return torch.load(path, map_location="cpu")
+
+
+def _infer_class_num(state_dict, fallback):
+    for key, value in state_dict.items():
+        if key.endswith("y_embedder.embedding_table.weight"):
+            return int(value.shape[0] - 1)
+    return fallback
+
+
+def _configure_refiner(args, checkpoint, state_dict):
+    has_refiner = any(key.startswith("detail_refiner.") for key in state_dict)
+    args.use_detail_refiner = int(has_refiner)
+    args.freeze_jit = int(has_refiner)
+    if not has_refiner:
+        return False
+
+    stem_weight = state_dict.get("detail_refiner.stem_1x.weight")
+    inferred_dim = int(stem_weight.shape[0]) if stem_weight is not None else 32
+    block_indices = {
+        key.split(".")[2]
+        for key in state_dict
+        if key.startswith("detail_refiner.blocks_1x.")
+        and len(key.split(".")) > 2
+        and key.split(".")[2].isdigit()
+    }
+    args.refiner_base_dim = int(
+        _checkpoint_arg(checkpoint, "refiner_base_dim", inferred_dim)
+    )
+    args.refiner_num_blocks = int(
+        _checkpoint_arg(checkpoint, "refiner_num_blocks", len(block_indices) or 2)
+    )
+    args.refiner_use_frequency = int(
+        _checkpoint_arg(
+            checkpoint,
+            "refiner_use_frequency",
+            any(".frequency." in key for key in state_dict),
+        )
+    )
+    args.refiner_max_residual = float(
+        _checkpoint_arg(checkpoint, "refiner_max_residual", 0.25)
+    )
+    return True
+
+
+def _load_denoiser(checkpoint_path, architecture, use_bg_subnet, device):
+    checkpoint = _load_checkpoint(checkpoint_path)
+    state_dict = checkpoint.get("model_ema1", checkpoint.get("model"))
+    if state_dict is None:
+        raise KeyError(f"No model or model_ema1 state in {checkpoint_path}")
+
+    args = get_args_parser().parse_args([])
+    args.model = architecture
+    args.use_bg_subnet = int(use_bg_subnet)
+    args.img_size = int(_checkpoint_arg(checkpoint, "img_size", args.img_size))
+    args.class_num = _infer_class_num(
+        state_dict,
+        int(_checkpoint_arg(checkpoint, "class_num", args.class_num)),
+    )
+    has_refiner = _configure_refiner(args, checkpoint, state_dict)
+
+    model = Denoiser(args)
+    model.load_state_dict(state_dict, strict=True)
+    model.to(device).eval()
+    print(
+        f"Loaded {architecture} from {checkpoint_path}; "
+        f"MSDT detail refiner: {has_refiner}"
+    )
+    return model
+
+
 class EnhancedInferencer:
     def __init__(
         self,
@@ -360,28 +440,20 @@ def ensemble_predict(device=0, aug=False, model_weights=[0.5, 0.5], use_scene_da
             )
 
     # 1. 初始化并加载 JiT-H (主模型)
-    args_H = get_args_parser().parse_args()
-    args_H.model = "JiT-H/16"
-    args_H.use_bg_subnet = False  # 根据你之前的设定
-    model_H = Denoiser(args_H)
-    ckpt_H = torch.load(
+    model_H = _load_denoiser(
         "/scrinvme/huilin/bdd/cp_data/raindrop_remove_2026/output/JiT-H-raindrop22/16/checkpoint-last.pth",
-        map_location="cpu",
+        architecture="JiT-H/16",
+        use_bg_subnet=False,
+        device=device,
     )
-    model_H.load_state_dict(ckpt_H.get("model_ema1", ckpt_H.get("model")))
-    model_H.to(device).eval()
 
     # 2. 初始化并加载 JiT-B (辅助模型)
-    args_B = get_args_parser().parse_args()
-    args_B.model = "JiT-B/16"
-    args_B.use_bg_subnet = True
-    model_B = Denoiser(args_B)
-    ckpt_B = torch.load(
+    model_B = _load_denoiser(
         "/scrinvme/huilin/bdd/cp_data/raindrop_remove_2026/output/JiT-B-raindrop13/16/checkpoint-last.pth",
-        map_location="cpu",
+        architecture="JiT-B/16",
+        use_bg_subnet=True,
+        device=device,
     )
-    model_B.load_state_dict(ckpt_B.get("model_ema1", ckpt_B.get("model")))
-    model_B.to(device).eval()
 
     # 3. 将多个模型打包送入强化推理器！
     if aug:

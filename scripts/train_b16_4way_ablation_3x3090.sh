@@ -36,6 +36,7 @@ NUM_SAMPLING_STEPS=${NUM_SAMPLING_STEPS:-1}
 SAVE_LAST_FREQ=${SAVE_LAST_FREQ:-5}
 LOG_FREQ=${LOG_FREQ:-50}
 ONLINE_EVAL=${ONLINE_EVAL:-1}
+RESUME_OPTIMIZER=${RESUME_OPTIMIZER:-0}
 
 scene_args=()
 if [[ -n "${SCENE_TRAIN_PATH}" ]]; then
@@ -87,6 +88,7 @@ run_exp() {
     --data_path "${DATA_PATH}" \
     --val_data_path "${VAL_DATA_PATH}" \
     --resume "${CKPT}" \
+    --resume_optimizer "${RESUME_OPTIMIZER}" \
     "${scene_args[@]}" \
     "${online_eval_args[@]}"
 }
