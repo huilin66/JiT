@@ -1,4 +1,5 @@
 import argparse
+from collections import Counter
 import csv
 import json
 import os
@@ -49,6 +50,239 @@ def class_id_from_flags(is_day, is_bg_focus):
     if is_day and is_bg_focus:
         return 2
     return 3
+
+
+def robust_mean(values, low=5.0, high=95.0):
+    values = np.asarray(values, dtype=np.float32)
+    if values.size == 0:
+        return 0.0
+    lo, hi = np.percentile(values, [low, high])
+    trimmed = values[(values >= lo) & (values <= hi)]
+    if trimmed.size == 0:
+        trimmed = values
+    return float(np.mean(trimmed))
+
+
+def image_sharpness_map(img_bgr):
+    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY).astype(np.float32)
+    gray = cv2.GaussianBlur(gray, (3, 3), 0)
+    grad_x = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
+    grad_y = cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3)
+    return grad_x * grad_x + grad_y * grad_y
+
+
+def build_residual_mask(
+    drop_img,
+    clear_img,
+    residual_percentile=90.0,
+    residual_min=8.0,
+    min_mask_ratio=0.005,
+    max_mask_ratio=0.55,
+    morph_kernel=5,
+):
+    diff = cv2.absdiff(drop_img, clear_img).astype(np.float32).mean(axis=2)
+    diff = cv2.GaussianBlur(diff, (5, 5), 0)
+    threshold = max(float(np.percentile(diff, residual_percentile)), residual_min)
+    mask = diff >= threshold
+
+    ratio = float(mask.mean())
+    if ratio < min_mask_ratio:
+        fallback_percentile = max(50.0, residual_percentile - 10.0)
+        threshold = max(float(np.percentile(diff, fallback_percentile)), residual_min * 0.5)
+        mask = diff >= threshold
+        ratio = float(mask.mean())
+
+    if ratio < min_mask_ratio:
+        flat = diff.reshape(-1)
+        keep = max(1, int(flat.size * min_mask_ratio))
+        threshold = float(np.partition(flat, flat.size - keep)[flat.size - keep])
+        mask = diff >= threshold
+    elif ratio > max_mask_ratio:
+        threshold = max(float(np.percentile(diff, 95.0)), residual_min)
+        mask = diff >= threshold
+
+    if morph_kernel > 1:
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (morph_kernel, morph_kernel))
+        mask_u8 = mask.astype(np.uint8) * 255
+        mask_u8 = cv2.morphologyEx(mask_u8, cv2.MORPH_OPEN, kernel)
+        mask_u8 = cv2.morphologyEx(mask_u8, cv2.MORPH_CLOSE, kernel)
+        mask = mask_u8 > 0
+
+    return mask, diff, threshold
+
+
+def predict_focus_scene_by_pair(
+    drop_path,
+    clear_path,
+    scene_count=4,
+    focus_threshold=0.0,
+    intensity_thresh=100.0,
+    residual_percentile=90.0,
+    residual_min=8.0,
+    min_mask_ratio=0.005,
+    max_mask_ratio=0.55,
+    morph_kernel=5,
+    bg_dilate=9,
+    prefer_name_day=True,
+):
+    drop_img = cv2.imread(str(drop_path), cv2.IMREAD_COLOR)
+    clear_img = cv2.imread(str(clear_path), cv2.IMREAD_COLOR)
+    if drop_img is None or clear_img is None:
+        return None
+
+    resized_clear = 0
+    if drop_img.shape[:2] != clear_img.shape[:2]:
+        clear_img = cv2.resize(clear_img, (drop_img.shape[1], drop_img.shape[0]), interpolation=cv2.INTER_AREA)
+        resized_clear = 1
+
+    mask, residual_map, residual_threshold = build_residual_mask(
+        drop_img=drop_img,
+        clear_img=clear_img,
+        residual_percentile=residual_percentile,
+        residual_min=residual_min,
+        min_mask_ratio=min_mask_ratio,
+        max_mask_ratio=max_mask_ratio,
+        morph_kernel=morph_kernel,
+    )
+    if bg_dilate > 1:
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (bg_dilate, bg_dilate))
+        bg_exclusion = cv2.dilate(mask.astype(np.uint8), kernel) > 0
+        bg_mask = ~bg_exclusion
+    else:
+        bg_mask = ~mask
+
+    if not np.any(mask) or not np.any(bg_mask):
+        return None
+
+    sharpness = image_sharpness_map(drop_img)
+    sharp_drop = robust_mean(sharpness[mask])
+    sharp_bg = robust_mean(sharpness[bg_mask])
+    focus_score = float(np.log(sharp_drop + 1e-6) - np.log(sharp_bg + 1e-6))
+    is_raindrop_focus = focus_score > focus_threshold
+    is_bg_focus = not is_raindrop_focus
+
+    mean_intensity = float(np.mean(cv2.cvtColor(drop_img, cv2.COLOR_BGR2GRAY)))
+    name_day = infer_day_from_name(Path(drop_path).name) if prefer_name_day else None
+    is_day = name_day if name_day is not None else mean_intensity > intensity_thresh
+
+    if scene_count == 2:
+        class_id = int(is_raindrop_focus)
+    elif scene_count == 4:
+        class_id = class_id_from_flags(is_day, is_bg_focus)
+    else:
+        raise ValueError(f"scene_count must be 2 or 4, got {scene_count}")
+
+    return {
+        "filename": Path(drop_path).name,
+        "class_id": int(class_id),
+        "scene_count": int(scene_count),
+        "is_day": int(is_day),
+        "is_bg_focus": int(is_bg_focus),
+        "is_raindrop_focus": int(is_raindrop_focus),
+        "focus_score": round(focus_score, 6),
+        "sharp_drop": round(sharp_drop, 6),
+        "sharp_bg": round(sharp_bg, 6),
+        "mask_ratio": round(float(mask.mean()), 6),
+        "residual_mean": round(float(np.mean(residual_map)), 6),
+        "residual_threshold": round(float(residual_threshold), 6),
+        "mean_intensity": round(mean_intensity, 4),
+        "resized_clear": resized_clear,
+    }
+
+
+def generate_focus_scene_labels(
+    data_root,
+    output_json,
+    output_csv=None,
+    scene_count=4,
+    drop_dir_name="Drop",
+    clear_dir_name="Clear",
+    focus_threshold=0.0,
+    intensity_thresh=100.0,
+    residual_percentile=90.0,
+    residual_min=8.0,
+    min_mask_ratio=0.005,
+    max_mask_ratio=0.55,
+    morph_kernel=5,
+    bg_dilate=9,
+    prefer_name_day=True,
+):
+    data_root = Path(data_root)
+    drop_dir = data_root / drop_dir_name
+    clear_dir = data_root / clear_dir_name
+    output_json = Path(output_json)
+    output_csv = Path(output_csv) if output_csv else output_json.with_suffix(".csv")
+    ensure_dir(output_json.parent)
+    ensure_dir(output_csv.parent)
+
+    files = list_images(drop_dir, recursive=False)
+    if not files:
+        raise RuntimeError(f"No images found in Drop directory: {drop_dir}")
+
+    rows = []
+    scene_dict = {}
+    failed = []
+    missing_clear = []
+
+    for drop_path in tqdm(files, desc=f"Generate {scene_count}scene focus labels"):
+        clear_path = clear_dir / drop_path.name
+        if not clear_path.exists():
+            missing_clear.append(drop_path.name)
+            continue
+        row = predict_focus_scene_by_pair(
+            drop_path=drop_path,
+            clear_path=clear_path,
+            scene_count=scene_count,
+            focus_threshold=focus_threshold,
+            intensity_thresh=intensity_thresh,
+            residual_percentile=residual_percentile,
+            residual_min=residual_min,
+            min_mask_ratio=min_mask_ratio,
+            max_mask_ratio=max_mask_ratio,
+            morph_kernel=morph_kernel,
+            bg_dilate=bg_dilate,
+            prefer_name_day=prefer_name_day,
+        )
+        if row is None:
+            failed.append(drop_path.name)
+            continue
+        rows.append(row)
+        scene_dict[row["filename"]] = row["class_id"]
+
+    if missing_clear:
+        raise RuntimeError(f"Missing {len(missing_clear)} clear pairs; first: {missing_clear[0]}")
+    if failed:
+        raise RuntimeError(f"Failed to label {len(failed)} images; first: {failed[0]}")
+
+    with open(output_json, "w", encoding="utf-8") as f:
+        json.dump(scene_dict, f, indent=2, sort_keys=True)
+
+    fieldnames = [
+        "filename",
+        "class_id",
+        "scene_count",
+        "is_day",
+        "is_bg_focus",
+        "is_raindrop_focus",
+        "focus_score",
+        "sharp_drop",
+        "sharp_bg",
+        "mask_ratio",
+        "residual_mean",
+        "residual_threshold",
+        "mean_intensity",
+        "resized_clear",
+    ]
+    with open(output_csv, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+    counts = {i: Counter(scene_dict.values()).get(i, 0) for i in range(scene_count)}
+    print(f"Saved focus scene json: {output_json}")
+    print(f"Saved focus scene stats csv: {output_csv}")
+    print("Class counts:", counts)
+    return scene_dict
 
 
 def analyze_image(img_path):
@@ -213,7 +447,8 @@ def check_trainable_folder(data_root, scene_json=None, drop_dir_name="Drop", cle
             scene_dict = json.load(f)
         missing_scene = sorted(drop_files - set(scene_dict.keys()))
         extra_scene = sorted(set(scene_dict.keys()) - drop_files)
-        counts = {i: 0 for i in range(4)}
+        max_class = max([int(value) for value in scene_dict.values()] or [3])
+        counts = {i: 0 for i in range(max(4, max_class + 1))}
         for value in scene_dict.values():
             if int(value) in counts:
                 counts[int(value)] += 1
@@ -310,6 +545,30 @@ def build_parser():
         help="Infer day/night from brightness even if filename starts with Day/Night",
     )
 
+    focus_parser = subparsers.add_parser(
+        "pseudo-focus-scene",
+        help="Generate 2scene/4scene labels from Drop/Clear residual masks and local sharpness",
+    )
+    focus_parser.add_argument("--data-root", required=True, help="Root containing Drop/Clear folders")
+    focus_parser.add_argument("--output-json", default="", help="Default: data-root/Drop_focus_{2,4}scene.json")
+    focus_parser.add_argument("--output-csv", default="", help="Default: same path as json with .csv suffix")
+    focus_parser.add_argument("--scene-count", type=int, choices=[2, 4], default=4)
+    focus_parser.add_argument("--drop-dir-name", default="Drop")
+    focus_parser.add_argument("--clear-dir-name", default="Clear")
+    focus_parser.add_argument("--focus-threshold", type=float, default=0.0)
+    focus_parser.add_argument("--intensity-thresh", type=float, default=100.0)
+    focus_parser.add_argument("--residual-percentile", type=float, default=90.0)
+    focus_parser.add_argument("--residual-min", type=float, default=8.0)
+    focus_parser.add_argument("--min-mask-ratio", type=float, default=0.005)
+    focus_parser.add_argument("--max-mask-ratio", type=float, default=0.55)
+    focus_parser.add_argument("--morph-kernel", type=int, default=5)
+    focus_parser.add_argument("--bg-dilate", type=int, default=9)
+    focus_parser.add_argument(
+        "--ignore-name-day",
+        action="store_true",
+        help="Infer day/night from brightness even if filename starts with Day/Night",
+    )
+
     check_parser = subparsers.add_parser("check", help="Check Drop/Clear pairs and scene json coverage")
     check_parser.add_argument("--data-root", required=True)
     check_parser.add_argument("--scene-json", default="")
@@ -362,6 +621,34 @@ def main():
             output_csv=output_csv,
             intensity_thresh=args.intensity_thresh,
             laplacian_thresh=args.laplacian_thresh,
+            prefer_name_day=not args.ignore_name_day,
+        )
+        check_trainable_folder(data_root, scene_json=output_json)
+        return
+
+    if args.command == "pseudo-focus-scene":
+        data_root = Path(args.data_root)
+        output_json = (
+            Path(args.output_json)
+            if args.output_json
+            else data_root / f"Drop_focus_{args.scene_count}scene.json"
+        )
+        output_csv = Path(args.output_csv) if args.output_csv else output_json.with_suffix(".csv")
+        generate_focus_scene_labels(
+            data_root=data_root,
+            output_json=output_json,
+            output_csv=output_csv,
+            scene_count=args.scene_count,
+            drop_dir_name=args.drop_dir_name,
+            clear_dir_name=args.clear_dir_name,
+            focus_threshold=args.focus_threshold,
+            intensity_thresh=args.intensity_thresh,
+            residual_percentile=args.residual_percentile,
+            residual_min=args.residual_min,
+            min_mask_ratio=args.min_mask_ratio,
+            max_mask_ratio=args.max_mask_ratio,
+            morph_kernel=args.morph_kernel,
+            bg_dilate=args.bg_dilate,
             prefer_name_day=not args.ignore_name_day,
         )
         check_trainable_folder(data_root, scene_json=output_json)

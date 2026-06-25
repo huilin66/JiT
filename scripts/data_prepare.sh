@@ -13,3 +13,13 @@ python tools/data_tools.py copy \
 
 python tools/data_tools.py pseudo-scene \
   --data-root "${DATA_ROOT}/RainDrop_Train"
+
+python tools/data_tools.py pseudo-focus-scene \
+  --data-root "${DATA_ROOT}/RainDrop_Train" \
+  --scene-count 2 \
+  --output-json "${DATA_ROOT}/RainDrop_Train/Drop_focus_2scene.json"
+
+python tools/data_tools.py pseudo-focus-scene \
+  --data-root "${DATA_ROOT}/RainDrop_Train" \
+  --scene-count 4 \
+  --output-json "${DATA_ROOT}/RainDrop_Train/Drop_focus_4scene.json"
