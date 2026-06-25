@@ -13,9 +13,11 @@ GPUS=${GPUS:-0,1,2}
 NPROC=${NPROC:-3}
 MASTER_PORT=${MASTER_PORT:-29630}
 
-DATA_PATH=${DATA_PATH:-/scrinvme/huilin/bdd/cp_data/raindrop_remove_2026/RainDrop_Train2}
+DATA_ROOT=${DATA_ROOT:-/root/huilin/data/eccv_dn}
+
+DATA_PATH=${DATA_PATH:-${DATA_ROOT}/RainDrop_Train}
 VAL_DATA_PATH=${VAL_DATA_PATH:-${DATA_PATH}}
-CKPT=${CKPT:-}
+CKPT=${CKPT:-ckpt/jit-b-16}
 OUTPUT_DIR=${OUTPUT_DIR:-run/train/jit_b16_msdt_refiner_stage1/16}
 
 if [[ -z "${CKPT}" ]]; then

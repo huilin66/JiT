@@ -14,9 +14,11 @@ GPUS=${GPUS:-0,1,2}
 NPROC=${NPROC:-3}
 MASTER_PORT_BASE=${MASTER_PORT_BASE:-29610}
 
-DATA_PATH=${DATA_PATH:-/scrinvme/huilin/bdd/cp_data/raindrop_remove_2026/RainDrop_Train2}
+DATA_ROOT=${DATA_ROOT:-/root/huilin/data/eccv_dn}
+
+DATA_PATH=${DATA_PATH:-${DATA_ROOT}/RainDrop_Train}
 VAL_DATA_PATH=${VAL_DATA_PATH:-${DATA_PATH}}
-CKPT=${CKPT:-/scrinvme/huilin/bdd/cp_data/raindrop_remove_2026/jit-b-16}
+CKPT=${CKPT:-ckpt/jit-b-16}
 OUT_ROOT=${OUT_ROOT:-run/train/ablation_b16_3x3090}
 
 # Optional scene-label json/csv. If empty, dataset.py falls back to its historical default path.

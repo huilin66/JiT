@@ -5,7 +5,7 @@ set -euo pipefail
 DATA_ROOT=${DATA_ROOT:-/root/huilin/data/eccv_dn}
 DATA_PATH=${DATA_PATH:-${DATA_ROOT}/RainDrop_Train}
 VAL_DATA_PATH=${VAL_DATA_PATH:-${DATA_PATH}}
-CKPT=${CKPT:-}
+CKPT=${CKPT:-ckpt/jit-b-16}
 OUTPUT_DIR=${OUTPUT_DIR:-run/train_smoke/jit_b16_msdt_refiner/16}
 
 if [[ -z "${CKPT}" ]]; then
