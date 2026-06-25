@@ -28,8 +28,10 @@ class EdgeLoss(nn.Module):
 
     def _gradient(self, image):
         channels = image.shape[1]
-        kernel_x = self.kernel_x.expand(channels, 1, 3, 3)
-        kernel_y = self.kernel_y.expand(channels, 1, 3, 3)
+        kernel_x = self.kernel_x.to(device=image.device, dtype=image.dtype)
+        kernel_y = self.kernel_y.to(device=image.device, dtype=image.dtype)
+        kernel_x = kernel_x.expand(channels, 1, 3, 3)
+        kernel_y = kernel_y.expand(channels, 1, 3, 3)
         grad_x = F.conv2d(image, kernel_x, padding=1, groups=channels)
         grad_y = F.conv2d(image, kernel_y, padding=1, groups=channels)
         return grad_x, grad_y
@@ -67,7 +69,7 @@ class DynamicRaindropLoss(nn.Module):
     ):
         super().__init__()
         self.charbonnier = CharbonnierLoss()
-        self.edge = EdgeLoss()
+        self.edge = EdgeLoss().to(device)
         self.frequency = FrequencyLoss()
 
         self.lpips_vgg = lpips.LPIPS(net="vgg").to(device).eval()
