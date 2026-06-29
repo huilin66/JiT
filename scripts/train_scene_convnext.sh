@@ -10,14 +10,14 @@ set -euo pipefail
 DATA_ROOT=${DATA_ROOT:-D:/zhl/data/eccv_dn}
 DATA_PATH=${DATA_PATH:-${DATA_ROOT}/RainDrop_Train}
 IMAGE_DIR=${IMAGE_DIR:-${DATA_PATH}/Drop}
-LABELS_JSON=${LABELS_JSON:-${DATA_PATH}/Drop_focus_4scene.json}
-OUTPUT_DIR=${OUTPUT_DIR:-run/scene_convnext_focus_4scene}
+LABELS_JSON=${LABELS_JSON:-${DATA_PATH}/Drop_dn_blur_4scene.json}
+OUTPUT_DIR=${OUTPUT_DIR:-run/scene_convnext_dn_blur_4scene}
 
 MODEL=${MODEL:-convnext_tiny}
 NUM_CLASSES=${NUM_CLASSES:-0}
 CLASS_NAMES=${CLASS_NAMES:-}
 IMAGE_SIZE=${IMAGE_SIZE:-448}
-EPOCHS=${EPOCHS:-100}
+EPOCHS=${EPOCHS:-20}
 BATCH_SIZE=${BATCH_SIZE:-64}
 LR=${LR:-1e-4}
 WEIGHT_DECAY=${WEIGHT_DECAY:-1e-4}
