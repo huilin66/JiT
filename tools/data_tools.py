@@ -765,6 +765,137 @@ def extract_drop_scene_samples(data_root, dest_root, scene_csv):
     print(f"Drop sample check finished. Images: {dest_root}; CSV: {scene_csv}")
 
 
+def _parse_binary_flag(value, field_name):
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "y", "blur"}:
+        return 1
+    if text in {"0", "false", "no", "n", "not_blur", "non_blur", "sharp"}:
+        return 0
+    raise ValueError(f"Invalid {field_name} value: {value!r}; expected 0/1")
+
+
+def _flat_drop_key(filename):
+    parts = Path(filename).name.split("_", 2)
+    if len(parts) < 3:
+        raise ValueError(f"Expected flat filename like Day_00001_xxx.png, got {filename!r}")
+    time_name = parts[0].strip().lower()
+    if time_name not in {"day", "night"}:
+        raise ValueError(f"Cannot infer day/night from filename: {filename!r}")
+    return time_name, parts[1]
+
+
+def _load_manual_blur_labels(manual_csv):
+    labels = {}
+    manual_csv = Path(manual_csv)
+    if not manual_csv.is_file():
+        raise FileNotFoundError(f"Manual blur CSV not found: {manual_csv}")
+    with open(manual_csv, "r", encoding="utf-8-sig", newline="") as f:
+        reader = csv.DictReader(f)
+        required = {"relative_folder", "time_of_day", "is_blur"}
+        missing = required - set(reader.fieldnames or [])
+        if missing:
+            raise ValueError(f"Manual blur CSV misses columns: {sorted(missing)}")
+        for row in reader:
+            if row.get("error", "").strip():
+                continue
+            time_name = row["time_of_day"].strip().lower()
+            if time_name not in {"day", "night"}:
+                raise ValueError(f"Invalid time_of_day in manual CSV: {row!r}")
+            folder = str(row["relative_folder"]).strip()
+            if not folder:
+                raise ValueError(f"Empty relative_folder in manual CSV: {row!r}")
+            labels[(time_name, folder)] = _parse_binary_flag(row["is_blur"], "is_blur")
+    if not labels:
+        raise RuntimeError(f"No usable manual blur labels loaded from: {manual_csv}")
+    return labels
+
+
+def generate_manual_blur_scene_labels(
+    data_root,
+    manual_csv,
+    output_2_json="",
+    output_4_json="",
+    output_csv="",
+):
+    data_root = Path(data_root)
+    drop_dir = data_root / "Drop"
+    if not drop_dir.is_dir():
+        raise RuntimeError(f"Missing flat Drop directory: {drop_dir}")
+
+    manual_labels = _load_manual_blur_labels(manual_csv)
+    output_2_json = Path(output_2_json) if output_2_json else data_root / "Drop_blur_2scene.json"
+    output_4_json = Path(output_4_json) if output_4_json else data_root / "Drop_dn_blur_4scene.json"
+    output_csv = Path(output_csv) if output_csv else output_4_json.with_suffix(".csv")
+    ensure_dir(output_2_json.parent)
+    ensure_dir(output_4_json.parent)
+    ensure_dir(output_csv.parent)
+
+    labels_2 = {}
+    labels_4 = {}
+    rows = []
+    missing = []
+    for image_path in list_images(drop_dir, recursive=False):
+        time_name, folder = _flat_drop_key(image_path.name)
+        key = (time_name, folder)
+        if key not in manual_labels:
+            missing.append(image_path.name)
+            continue
+        is_blur = int(manual_labels[key])
+        is_day = time_name == "day"
+        class_2 = is_blur
+        class_4 = (2 if is_day else 0) + is_blur
+        labels_2[image_path.name] = class_2
+        labels_4[image_path.name] = class_4
+        rows.append(
+            {
+                "filename": image_path.name,
+                "time_of_day": time_name,
+                "relative_folder": folder,
+                "is_blur": is_blur,
+                "class_2": class_2,
+                "class_2_name": "blur" if is_blur else "not_blur",
+                "class_4": class_4,
+                "class_4_name": (
+                    ("day" if is_day else "night")
+                    + ("_blur" if is_blur else "_not_blur")
+                ),
+            }
+        )
+
+    if missing:
+        raise RuntimeError(
+            f"Manual blur CSV misses {len(missing)} flat Drop image(s); first: {missing[0]}"
+        )
+
+    with open(output_2_json, "w", encoding="utf-8") as f:
+        json.dump(labels_2, f, indent=2, sort_keys=True)
+    with open(output_4_json, "w", encoding="utf-8") as f:
+        json.dump(labels_4, f, indent=2, sort_keys=True)
+    with open(output_csv, "w", newline="", encoding="utf-8") as f:
+        fieldnames = [
+            "filename",
+            "time_of_day",
+            "relative_folder",
+            "is_blur",
+            "class_2",
+            "class_2_name",
+            "class_4",
+            "class_4_name",
+        ]
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+    counts_2 = {i: Counter(labels_2.values()).get(i, 0) for i in range(2)}
+    counts_4 = {i: Counter(labels_4.values()).get(i, 0) for i in range(4)}
+    print(f"Saved manual blur 2scene json: {output_2_json}")
+    print(f"Saved manual day/night+blur 4scene json: {output_4_json}")
+    print(f"Saved manual blur stats csv: {output_csv}")
+    print("2scene class counts:", counts_2)
+    print("4scene class counts:", counts_4)
+    return labels_2, labels_4
+
+
 def convert_manual_labels(input_excel, output_csv):
     input_excel = Path(input_excel)
     output_csv = Path(output_csv)
@@ -901,6 +1032,32 @@ def build_parser():
         help="Default: dest-root/sample_scene_4way.csv",
     )
 
+    manual_blur_parser = subparsers.add_parser(
+        "manual-blur-scenes",
+        help="Generate flat Drop scene JSONs from manually checked is_blur CSV",
+    )
+    manual_blur_parser.add_argument(
+        "--data-root",
+        required=True,
+        help="Copied flat train root containing Drop/Clear, e.g. RainDrop_Train",
+    )
+    manual_blur_parser.add_argument("--manual-csv", required=True)
+    manual_blur_parser.add_argument(
+        "--output-2-json",
+        default="",
+        help="Default: data-root/Drop_blur_2scene.json",
+    )
+    manual_blur_parser.add_argument(
+        "--output-4-json",
+        default="",
+        help="Default: data-root/Drop_dn_blur_4scene.json",
+    )
+    manual_blur_parser.add_argument(
+        "--output-csv",
+        default="",
+        help="Default: output-4-json with .csv suffix",
+    )
+
     manual_parser = subparsers.add_parser("manual-labels", help="Convert manual Excel labels to csv")
     manual_parser.add_argument("--input-excel", required=True)
     manual_parser.add_argument("--output-csv", required=True)
@@ -1024,6 +1181,18 @@ def main():
 
     if args.command == "drop-scene-samples":
         extract_drop_scene_samples(args.data_root, args.dest_root, args.scene_csv)
+        return
+
+    if args.command == "manual-blur-scenes":
+        manual_4_json = args.output_4_json or str(Path(args.data_root) / "Drop_dn_blur_4scene.json")
+        generate_manual_blur_scene_labels(
+            data_root=args.data_root,
+            manual_csv=args.manual_csv,
+            output_2_json=args.output_2_json,
+            output_4_json=args.output_4_json,
+            output_csv=args.output_csv,
+        )
+        check_trainable_folder(args.data_root, scene_json=manual_4_json)
         return
 
     if args.command == "manual-labels":

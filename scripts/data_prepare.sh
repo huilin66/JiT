@@ -9,20 +9,30 @@ DATA_ROOT="D:\zhl\data\eccv_dn"
 
 
 SCENE_NUM_WORKERS=${SCENE_NUM_WORKERS:-8}
+EXTRACT_SAMPLES=${EXTRACT_SAMPLES:-0}
+GENERATE_MANUAL_BLUR_SCENE=${GENERATE_MANUAL_BLUR_SCENE:-1}
 SAMPLE_ROOT=${SAMPLE_ROOT:-${DATA_ROOT}/sample_check}
 SAMPLE_SCENE_CSV=${SAMPLE_SCENE_CSV:-${DATA_ROOT}/sample_check.csv}
-
+MANUAL_BLUR_CSV=${MANUAL_BLUR_CSV:-${SAMPLE_SCENE_CSV}}
 
 python tools/data_tools.py drop-scene-samples \
   --data-root "${DATA_ROOT}" \
   --dest-root "${SAMPLE_ROOT}" \
   --scene-csv "${SAMPLE_SCENE_CSV}"
-
+  
 
 python tools/data_tools.py copy \
   --day-root "${DATA_ROOT}/DayRainDrop_Train" \
   --night-root "${DATA_ROOT}/NightRainDrop_Train" \
   --dst-root "${DATA_ROOT}/RainDrop_Train"
+
+
+python tools/data_tools.py manual-blur-scenes \
+  --data-root "${DATA_ROOT}/RainDrop_Train" \
+  --manual-csv "${MANUAL_BLUR_CSV}" \
+  --output-2-json "${DATA_ROOT}/RainDrop_Train/Drop_blur_2scene.json" \
+  --output-4-json "${DATA_ROOT}/RainDrop_Train/Drop_dn_blur_4scene.json"
+fi
 
 python tools/data_tools.py pseudo-scene \
   --data-root "${DATA_ROOT}/RainDrop_Train" \
