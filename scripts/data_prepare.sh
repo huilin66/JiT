@@ -2,9 +2,9 @@
 
 set -euo pipefail
 
-# DATA_ROOT="/root/huilin/data/eccv_dn"
+DATA_ROOT="/root/huilin/data/eccv_dn"
 # DATA_ROOT="/scrinvme/huilin/tp/eccv_dn"
-DATA_ROOT="D:\zhl\data\eccv_dn"
+# DATA_ROOT="D:\zhl\data\eccv_dn"
 SCENE_NUM_WORKERS=${SCENE_NUM_WORKERS:-8}
 
 python tools/data_tools.py copy \
