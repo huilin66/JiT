@@ -15,6 +15,12 @@ from tqdm import tqdm
 
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp"}
+SCENE_CLASS_NAMES = {
+    0: "night_bg_focus",
+    1: "night_raindrop_focus",
+    2: "day_bg_focus",
+    3: "day_raindrop_focus",
+}
 
 
 def is_image(path):
@@ -596,12 +602,108 @@ def _safe_relative_name(relative_path):
     return "__".join(parts)
 
 
-def extract_sample_images(source_dir, dest_dir, recursive=False, keep_tree=False):
+def _images_equal(first_path, second_path):
+    first = cv2.imread(str(first_path), cv2.IMREAD_COLOR)
+    second = cv2.imread(str(second_path), cv2.IMREAD_COLOR)
+    if first is None or second is None or first.shape != second.shape:
+        return False
+    return bool(np.array_equal(first, second))
+
+
+def _infer_day_from_source(source_dir):
+    text = source_dir.as_posix().lower()
+    has_day = "day" in text
+    has_night = "night" in text
+    if has_day == has_night:
+        return None
+    return has_day
+
+
+def _sample_scene_row(source_dir, src_path, dst_path, relative_folder):
+    dataset_root = source_dir.parent if source_dir.name.lower() == "drop" else source_dir
+    clear_path = dataset_root / "Clear" / relative_folder / src_path.name
+    blur_path = dataset_root / "Blur" / relative_folder / src_path.name
+    is_day = _infer_day_from_source(source_dir)
+
+    row = {
+        "source_path": str(src_path),
+        "copied_path": str(dst_path),
+        "relative_folder": relative_folder.as_posix(),
+        "filename": src_path.name,
+        "clear_path": str(clear_path),
+        "blur_path": str(blur_path),
+        "time_of_day": "",
+        "is_bg_focus": "",
+        "is_raindrop_focus": "",
+        "class_id": "",
+        "class_name": "",
+        "error": "",
+    }
+
+    if is_day is None:
+        row["error"] = "cannot_infer_day_or_night_from_source_dir"
+        return row
+    row["time_of_day"] = "day" if is_day else "night"
+
+    if not clear_path.exists():
+        row["error"] = "missing_clear"
+        return row
+    if not blur_path.exists():
+        row["error"] = "missing_blur"
+        return row
+
+    is_bg_focus = _images_equal(blur_path, clear_path)
+    class_id = class_id_from_flags(is_day=is_day, is_bg_focus=is_bg_focus)
+    row["is_bg_focus"] = int(is_bg_focus)
+    row["is_raindrop_focus"] = int(not is_bg_focus)
+    row["class_id"] = class_id
+    row["class_name"] = SCENE_CLASS_NAMES[class_id]
+    return row
+
+
+def _write_sample_scene_csv(scene_csv, rows, mode):
+    if not scene_csv:
+        return
+    scene_csv = Path(scene_csv)
+    ensure_dir(scene_csv.parent)
+    fieldnames = [
+        "source_path",
+        "copied_path",
+        "relative_folder",
+        "filename",
+        "clear_path",
+        "blur_path",
+        "time_of_day",
+        "is_bg_focus",
+        "is_raindrop_focus",
+        "class_id",
+        "class_name",
+        "error",
+    ]
+    write_header = mode == "write" or not scene_csv.exists()
+    open_mode = "w" if mode == "write" else "a"
+    with open(scene_csv, open_mode, newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        if write_header:
+            writer.writeheader()
+        writer.writerows(rows)
+    print(f"Saved sample scene csv: {scene_csv}")
+
+
+def extract_sample_images(
+    source_dir,
+    dest_dir,
+    recursive=False,
+    keep_tree=False,
+    scene_csv="",
+    scene_csv_mode="append",
+):
     source_dir = Path(source_dir)
     dest_dir = Path(dest_dir)
     ensure_dir(dest_dir)
 
     count = 0
+    scene_rows = []
     if recursive:
         folders = sorted(
             p for p in source_dir.rglob("*")
@@ -623,7 +725,10 @@ def extract_sample_images(source_dir, dest_dir, recursive=False, keep_tree=False
             folder_name = _safe_relative_name(relative_folder)
             dst_path = dest_dir / f"{folder_name}{src_path.suffix}"
         shutil.copy2(src_path, dst_path)
+        if scene_csv:
+            scene_rows.append(_sample_scene_row(source_dir, src_path, dst_path, relative_folder))
         count += 1
+    _write_sample_scene_csv(scene_csv, scene_rows, scene_csv_mode)
     print(f"Extracted {count} sample images to {dest_dir}")
 
 
@@ -738,6 +843,17 @@ def build_parser():
         "--keep-tree",
         action="store_true",
         help="Preserve the source folder tree under dest-dir instead of flattening names.",
+    )
+    sample_parser.add_argument(
+        "--scene-csv",
+        default="",
+        help="Optional CSV path recording 4-way scene labels for copied Drop samples.",
+    )
+    sample_parser.add_argument(
+        "--scene-csv-mode",
+        default="append",
+        choices=["append", "write"],
+        help="Use write for the first source and append for later sources.",
     )
 
     manual_parser = subparsers.add_parser("manual-labels", help="Convert manual Excel labels to csv")
@@ -856,6 +972,8 @@ def main():
             args.dest_dir,
             recursive=args.recursive,
             keep_tree=args.keep_tree,
+            scene_csv=args.scene_csv,
+            scene_csv_mode=args.scene_csv_mode,
         )
         return
 

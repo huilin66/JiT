@@ -2,16 +2,18 @@
 
 set -euo pipefail
 
-DATA_ROOT="/root/huilin/data/eccv_dn"
+# DATA_ROOT="/root/huilin/data/eccv_dn"
 # DATA_ROOT="/scrinvme/huilin/tp/eccv_dn"
 # DATA_ROOT="D:\zhl\data\eccv_dn"
 SCENE_NUM_WORKERS=${SCENE_NUM_WORKERS:-8}
 EXTRACT_SAMPLES=${EXTRACT_SAMPLES:-0}
 SAMPLE_ROOT=${SAMPLE_ROOT:-${DATA_ROOT}/sample_check}
+SAMPLE_SCENE_CSV=${SAMPLE_SCENE_CSV:-${DATA_ROOT}/sample_check.csv}
 
 extract_first_images() {
   local source_dir="$1"
   local dest_dir="$2"
+  local csv_mode="$3"
 
   if [[ ! -d "${source_dir}" ]]; then
     echo "[samples] skip missing directory: ${source_dir}"
@@ -22,16 +24,14 @@ extract_first_images() {
     --source-dir "${source_dir}" \
     --dest-dir "${dest_dir}" \
     --recursive \
-    --keep-tree
+    --keep-tree \
+    --scene-csv "${SAMPLE_SCENE_CSV}" \
+    --scene-csv-mode "${csv_mode}"
 }
 
 if [[ "${EXTRACT_SAMPLES}" == "1" ]]; then
-  extract_first_images "${DATA_ROOT}/DayRainDrop_Train/Drop" "${SAMPLE_ROOT}/day/drop"
-  extract_first_images "${DATA_ROOT}/DayRainDrop_Train/Clear" "${SAMPLE_ROOT}/day/clear"
-  extract_first_images "${DATA_ROOT}/DayRainDrop_Train/Blur" "${SAMPLE_ROOT}/day/blur"
-  extract_first_images "${DATA_ROOT}/NightRainDrop_Train/Drop" "${SAMPLE_ROOT}/night/drop"
-  extract_first_images "${DATA_ROOT}/NightRainDrop_Train/Clear" "${SAMPLE_ROOT}/night/clear"
-  extract_first_images "${DATA_ROOT}/NightRainDrop_Train/Blur" "${SAMPLE_ROOT}/night/blur"
+  extract_first_images "${DATA_ROOT}/DayRainDrop_Train/Drop" "${SAMPLE_ROOT}/day/drop" "write"
+  extract_first_images "${DATA_ROOT}/NightRainDrop_Train/Drop" "${SAMPLE_ROOT}/night/drop" "append"
 fi
 
 python tools/data_tools.py copy \
