@@ -7,7 +7,7 @@ set -euo pipefail
 #   DATA_PATH=/data/RainDrop_Train bash scripts/train_scene_convnext.sh
 #   LABELS_JSON=/data/RainDrop_Train/Drop_dn_2scene.json NUM_CLASSES=2 CLASS_NAMES=night,day bash scripts/train_scene_convnext.sh
 
-DATA_ROOT=${DATA_ROOT:-D:\zhl\data\eccv_dn}
+DATA_ROOT=${DATA_ROOT:-D:/zhl/data/eccv_dn}
 DATA_PATH=${DATA_PATH:-${DATA_ROOT}/RainDrop_Train}
 IMAGE_DIR=${IMAGE_DIR:-${DATA_PATH}/Drop}
 LABELS_JSON=${LABELS_JSON:-${DATA_PATH}/Drop_focus_4scene.json}
