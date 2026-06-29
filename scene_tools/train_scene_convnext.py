@@ -2,6 +2,7 @@ import argparse
 import csv
 import math
 import random
+import time
 from contextlib import nullcontext
 from pathlib import Path
 
@@ -74,6 +75,17 @@ def create_scaler(enabled):
         return torch.amp.GradScaler("cuda", enabled=enabled)
     except TypeError:
         return torch.cuda.amp.GradScaler(enabled=enabled)
+
+
+def format_duration(seconds):
+    seconds = max(0, int(round(seconds)))
+    hours, remainder = divmod(seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours:
+        return f"{hours:d}h{minutes:02d}m{seconds:02d}s"
+    if minutes:
+        return f"{minutes:d}m{seconds:02d}s"
+    return f"{seconds:d}s"
 
 
 def run_epoch(model, loader, criterion, device, amp_dtype, num_classes, optimizer=None, scaler=None):
@@ -211,25 +223,47 @@ def main():
 
     history_path = output_dir / "training_history.csv"
     write_header = not history_path.exists() or start_epoch == 0
+    training_started = time.perf_counter()
+    completed_epoch_times = []
     with open(history_path, "a", newline="", encoding="utf-8") as history_file:
         writer = csv.DictWriter(
             history_file,
-            fieldnames=["epoch", "lr", "train_loss", "train_acc", "val_loss", "val_acc", "val_macro_acc"],
+            fieldnames=[
+                "epoch",
+                "lr",
+                "train_loss",
+                "train_acc",
+                "val_loss",
+                "val_acc",
+                "val_macro_acc",
+                "epoch_seconds",
+                "elapsed_seconds",
+                "eta_seconds",
+            ],
         )
         if write_header:
             writer.writeheader()
         for epoch in range(start_epoch, args.epochs):
+            epoch_started = time.perf_counter()
             train_metrics = run_epoch(
                 model, train_loader, criterion, device, amp_dtype, num_classes, optimizer, scaler
             )
             val_metrics = run_epoch(model, val_loader, criterion, device, amp_dtype, num_classes)
             lr = optimizer.param_groups[0]["lr"]
             scheduler.step()
+            epoch_seconds = time.perf_counter() - epoch_started
+            completed_epoch_times.append(epoch_seconds)
+            elapsed_seconds = time.perf_counter() - training_started
+            remaining_epochs = max(0, args.epochs - epoch - 1)
+            mean_epoch_seconds = sum(completed_epoch_times) / len(completed_epoch_times)
+            eta_seconds = remaining_epochs * mean_epoch_seconds
             print(
                 f"Epoch {epoch + 1}/{args.epochs} lr={lr:.3e} "
                 f"train_loss={train_metrics['loss']:.4f} train_acc={train_metrics['accuracy']:.4f} "
                 f"val_loss={val_metrics['loss']:.4f} val_acc={val_metrics['accuracy']:.4f} "
-                f"val_macro_acc={val_metrics['macro_accuracy']:.4f} per_class={val_metrics['per_class']}"
+                f"val_macro_acc={val_metrics['macro_accuracy']:.4f} "
+                f"time={format_duration(epoch_seconds)} elapsed={format_duration(elapsed_seconds)} "
+                f"eta={format_duration(eta_seconds)} per_class={val_metrics['per_class']}"
             )
             writer.writerow(
                 {
@@ -240,6 +274,9 @@ def main():
                     "val_loss": val_metrics["loss"],
                     "val_acc": val_metrics["accuracy"],
                     "val_macro_acc": val_metrics["macro_accuracy"],
+                    "epoch_seconds": round(epoch_seconds, 3),
+                    "elapsed_seconds": round(elapsed_seconds, 3),
+                    "eta_seconds": round(eta_seconds, 3),
                 }
             )
             history_file.flush()
