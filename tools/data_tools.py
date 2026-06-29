@@ -589,19 +589,39 @@ def count_dataset_images(base_dir):
     print(f"Images: {total_images}")
 
 
-def extract_sample_images(source_dir, dest_dir):
+def _safe_relative_name(relative_path):
+    parts = [part for part in relative_path.parts if part not in ("", ".")]
+    if not parts:
+        return "root"
+    return "__".join(parts)
+
+
+def extract_sample_images(source_dir, dest_dir, recursive=False, keep_tree=False):
     source_dir = Path(source_dir)
     dest_dir = Path(dest_dir)
     ensure_dir(dest_dir)
 
     count = 0
-    folders = sorted(p for p in source_dir.iterdir() if p.is_dir())
+    if recursive:
+        folders = sorted(
+            p for p in source_dir.rglob("*")
+            if p.is_dir() and any(is_image(child) for child in p.iterdir() if child.is_file())
+        )
+    else:
+        folders = sorted(p for p in source_dir.iterdir() if p.is_dir())
     for folder in tqdm(folders, desc="Extract sample images"):
         files = list_images(folder, recursive=False)
         if not files:
             continue
         src_path = files[0]
-        dst_path = dest_dir / f"{folder.name}{src_path.suffix}"
+        relative_folder = folder.relative_to(source_dir)
+        if keep_tree:
+            dst_folder = dest_dir / relative_folder
+            ensure_dir(dst_folder)
+            dst_path = dst_folder / src_path.name
+        else:
+            folder_name = _safe_relative_name(relative_folder)
+            dst_path = dest_dir / f"{folder_name}{src_path.suffix}"
         shutil.copy2(src_path, dst_path)
         count += 1
     print(f"Extracted {count} sample images to {dest_dir}")
@@ -706,9 +726,19 @@ def build_parser():
     count_parser = subparsers.add_parser("count", help="Count images under subfolders")
     count_parser.add_argument("--base-dir", required=True)
 
-    sample_parser = subparsers.add_parser("samples", help="Extract one sample image per subfolder")
+    sample_parser = subparsers.add_parser("samples", help="Extract the first image from each subfolder")
     sample_parser.add_argument("--source-dir", required=True)
     sample_parser.add_argument("--dest-dir", required=True)
+    sample_parser.add_argument(
+        "--recursive",
+        action="store_true",
+        help="Scan every nested folder that directly contains images.",
+    )
+    sample_parser.add_argument(
+        "--keep-tree",
+        action="store_true",
+        help="Preserve the source folder tree under dest-dir instead of flattening names.",
+    )
 
     manual_parser = subparsers.add_parser("manual-labels", help="Convert manual Excel labels to csv")
     manual_parser.add_argument("--input-excel", required=True)
@@ -821,7 +851,12 @@ def main():
         return
 
     if args.command == "samples":
-        extract_sample_images(args.source_dir, args.dest_dir)
+        extract_sample_images(
+            args.source_dir,
+            args.dest_dir,
+            recursive=args.recursive,
+            keep_tree=args.keep_tree,
+        )
         return
 
     if args.command == "manual-labels":

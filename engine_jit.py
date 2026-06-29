@@ -121,7 +121,7 @@ def evaluate_best_metric(
     model_without_ddp, data_loader_val, device, pure_val=False, steps=10
 ):
     """
-    计算综合得分: 10*PSNR + 10*SSIM - 5*LPIPS
+    计算比赛综合得分: PSNR(Y) + 10*SSIM(Y) - 5*LPIPS
     得分越高，说明画质越好。
     """
     global lpips_vgg
@@ -168,7 +168,7 @@ def evaluate_best_metric(
         val_psnr = -10 * torch.log10(mse + 1e-8).mean().item()
         val_ssim = ssim(pred_y, target_y, data_range=1.0).item()
 
-        composite_score = 10.0 * val_psnr + 10.0 * val_ssim - 5.0 * val_lpips
+        composite_score = val_psnr + 10.0 * val_ssim - 5.0 * val_lpips
 
         total_scores["score"] += composite_score * x.size(0)
         total_scores["psnr"] += val_psnr * x.size(0)
