@@ -626,12 +626,9 @@ def _sample_scene_row(source_dir, src_path, dst_path, relative_folder):
     is_day = _infer_day_from_source(source_dir)
 
     row = {
-        "source_path": str(src_path),
-        "copied_path": str(dst_path),
         "relative_folder": relative_folder.as_posix(),
         "filename": src_path.name,
-        "clear_path": str(clear_path),
-        "blur_path": str(blur_path),
+        "copied_filename": dst_path.name,
         "time_of_day": "",
         "is_bg_focus": "",
         "is_raindrop_focus": "",
@@ -667,12 +664,9 @@ def _write_sample_scene_csv(scene_csv, rows, mode):
     scene_csv = Path(scene_csv)
     ensure_dir(scene_csv.parent)
     fieldnames = [
-        "source_path",
-        "copied_path",
         "relative_folder",
         "filename",
-        "clear_path",
-        "blur_path",
+        "copied_filename",
         "time_of_day",
         "is_bg_focus",
         "is_raindrop_focus",
@@ -741,12 +735,12 @@ def extract_drop_scene_samples(data_root, dest_root, scene_csv):
     tasks = [
         (
             data_root / "DayRainDrop_Train" / "Drop",
-            dest_root / "day" / "drop",
+            dest_root / "day",
             "write",
         ),
         (
             data_root / "NightRainDrop_Train" / "Drop",
-            dest_root / "night" / "drop",
+            dest_root / "night",
             "append",
         ),
     ]
@@ -760,7 +754,7 @@ def extract_drop_scene_samples(data_root, dest_root, scene_csv):
             source_dir=source_dir,
             dest_dir=dest_dir,
             recursive=True,
-            keep_tree=True,
+            keep_tree=False,
             scene_csv=scene_csv,
             scene_csv_mode=csv_mode,
         )
