@@ -1,9 +1,11 @@
 import argparse
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 import csv
 import json
 import os
 import shutil
+from functools import partial
 from pathlib import Path
 
 import cv2
@@ -27,6 +29,20 @@ def list_images(root, recursive=False):
 
 def ensure_dir(path):
     Path(path).mkdir(parents=True, exist_ok=True)
+
+
+def run_threaded(items, worker, desc, num_workers=1):
+    num_workers = int(num_workers)
+    if num_workers <= 1:
+        return [worker(item) for item in tqdm(items, desc=desc)]
+    with ThreadPoolExecutor(max_workers=num_workers) as executor:
+        return list(
+            tqdm(
+                executor.map(worker, items),
+                total=len(items),
+                desc=f"{desc} ({num_workers} threads)",
+            )
+        )
 
 
 def infer_day_from_name(img_name):
@@ -206,6 +222,7 @@ def generate_focus_scene_labels(
     morph_kernel=5,
     bg_dilate=9,
     prefer_name_day=True,
+    num_workers=1,
 ):
     data_root = Path(data_root)
     drop_dir = data_root / drop_dir_name
@@ -224,11 +241,10 @@ def generate_focus_scene_labels(
     failed = []
     missing_clear = []
 
-    for drop_path in tqdm(files, desc=f"Generate {scene_count}scene focus labels"):
+    def process_one(drop_path):
         clear_path = clear_dir / drop_path.name
         if not clear_path.exists():
-            missing_clear.append(drop_path.name)
-            continue
+            return "missing_clear", drop_path.name, None
         row = predict_focus_scene_by_pair(
             drop_path=drop_path,
             clear_path=clear_path,
@@ -244,7 +260,21 @@ def generate_focus_scene_labels(
             prefer_name_day=prefer_name_day,
         )
         if row is None:
-            failed.append(drop_path.name)
+            return "failed", drop_path.name, None
+        return "ok", drop_path.name, row
+
+    results = run_threaded(
+        files,
+        process_one,
+        desc=f"Generate {scene_count}scene focus labels",
+        num_workers=num_workers,
+    )
+    for status, name, row in results:
+        if status == "missing_clear":
+            missing_clear.append(name)
+            continue
+        if status == "failed":
+            failed.append(name)
             continue
         rows.append(row)
         scene_dict[row["filename"]] = row["class_id"]
@@ -328,6 +358,7 @@ def generate_scene_pseudo_labels(
     intensity_thresh=100.0,
     laplacian_thresh=500.0,
     prefer_name_day=True,
+    num_workers=1,
 ):
     drop_dir = Path(drop_dir)
     output_json = Path(output_json)
@@ -343,13 +374,14 @@ def generate_scene_pseudo_labels(
     scene_dict = {}
     failed = []
 
-    for img_path in tqdm(files, desc="Generate scene pseudo labels"):
-        row = predict_scene_by_heuristics(
-            img_path,
-            intensity_thresh=intensity_thresh,
-            laplacian_thresh=laplacian_thresh,
-            prefer_name_day=prefer_name_day,
-        )
+    worker = partial(
+        predict_scene_by_heuristics,
+        intensity_thresh=intensity_thresh,
+        laplacian_thresh=laplacian_thresh,
+        prefer_name_day=prefer_name_day,
+    )
+    results = run_threaded(files, worker, desc="Generate scene pseudo labels", num_workers=num_workers)
+    for img_path, row in zip(files, results):
         if row is None:
             failed.append(img_path.name)
             continue
@@ -380,6 +412,84 @@ def generate_scene_pseudo_labels(
 
     print(f"Saved scene json: {output_json}")
     print(f"Saved scene stats csv: {output_csv}")
+    print("Class counts:", counts)
+    if failed:
+        print(f"Warning: failed to read {len(failed)} images. First failed: {failed[0]}")
+    return scene_dict
+
+
+def predict_day_night_label(img_path, intensity_thresh=100.0, prefer_name_day=True):
+    stats = analyze_image(img_path)
+    if stats is None:
+        return None
+
+    mean_intensity, _ = stats
+    name_day = infer_day_from_name(Path(img_path).name) if prefer_name_day else None
+    is_day = name_day if name_day is not None else mean_intensity > intensity_thresh
+    return {
+        "filename": Path(img_path).name,
+        "class_id": int(is_day),
+        "is_day": int(is_day),
+        "mean_intensity": round(mean_intensity, 4),
+        "label_source": "name" if name_day is not None else "brightness",
+    }
+
+
+def generate_day_night_scene_labels(
+    drop_dir,
+    output_json,
+    output_csv=None,
+    intensity_thresh=100.0,
+    prefer_name_day=True,
+    num_workers=1,
+):
+    drop_dir = Path(drop_dir)
+    output_json = Path(output_json)
+    output_csv = Path(output_csv) if output_csv else output_json.with_suffix(".csv")
+    ensure_dir(output_json.parent)
+    ensure_dir(output_csv.parent)
+
+    files = list_images(drop_dir, recursive=False)
+    if not files:
+        raise RuntimeError(f"No images found in Drop directory: {drop_dir}")
+
+    rows = []
+    scene_dict = {}
+    failed = []
+
+    worker = partial(
+        predict_day_night_label,
+        intensity_thresh=intensity_thresh,
+        prefer_name_day=prefer_name_day,
+    )
+    results = run_threaded(files, worker, desc="Generate day/night 2scene labels", num_workers=num_workers)
+    for img_path, row in zip(files, results):
+        if row is None:
+            failed.append(img_path.name)
+            continue
+        rows.append(row)
+        scene_dict[row["filename"]] = row["class_id"]
+
+    with open(output_json, "w", encoding="utf-8") as f:
+        json.dump(scene_dict, f, indent=2, sort_keys=True)
+
+    with open(output_csv, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(
+            f,
+            fieldnames=[
+                "filename",
+                "class_id",
+                "is_day",
+                "mean_intensity",
+                "label_source",
+            ],
+        )
+        writer.writeheader()
+        writer.writerows(rows)
+
+    counts = {0: Counter(scene_dict.values()).get(0, 0), 1: Counter(scene_dict.values()).get(1, 0)}
+    print(f"Saved day/night scene json: {output_json}")
+    print(f"Saved day/night scene stats csv: {output_csv}")
     print("Class counts:", counts)
     if failed:
         print(f"Warning: failed to read {len(failed)} images. First failed: {failed[0]}")
@@ -539,6 +649,7 @@ def build_parser():
     pseudo_parser.add_argument("--output-csv", default="", help="Default: same path as json with .csv suffix")
     pseudo_parser.add_argument("--intensity-thresh", type=float, default=100.0)
     pseudo_parser.add_argument("--laplacian-thresh", type=float, default=500.0)
+    pseudo_parser.add_argument("--num-workers", type=int, default=1, help="Thread workers for image analysis")
     pseudo_parser.add_argument(
         "--ignore-name-day",
         action="store_true",
@@ -563,7 +674,24 @@ def build_parser():
     focus_parser.add_argument("--max-mask-ratio", type=float, default=0.55)
     focus_parser.add_argument("--morph-kernel", type=int, default=5)
     focus_parser.add_argument("--bg-dilate", type=int, default=9)
+    focus_parser.add_argument("--num-workers", type=int, default=1, help="Thread workers for image analysis")
     focus_parser.add_argument(
+        "--ignore-name-day",
+        action="store_true",
+        help="Infer day/night from brightness even if filename starts with Day/Night",
+    )
+
+    dn_parser = subparsers.add_parser(
+        "pseudo-day-night-scene",
+        help="Generate Drop_dn_2scene.json labels: 0=night, 1=day",
+    )
+    dn_parser.add_argument("--data-root", default="", help="Root containing Drop/Clear folders")
+    dn_parser.add_argument("--drop-dir", default="", help="Drop directory. Overrides --data-root/Drop")
+    dn_parser.add_argument("--output-json", default="", help="Default: data-root/Drop_dn_2scene.json")
+    dn_parser.add_argument("--output-csv", default="", help="Default: same path as json with .csv suffix")
+    dn_parser.add_argument("--intensity-thresh", type=float, default=100.0)
+    dn_parser.add_argument("--num-workers", type=int, default=1, help="Thread workers for image analysis")
+    dn_parser.add_argument(
         "--ignore-name-day",
         action="store_true",
         help="Infer day/night from brightness even if filename starts with Day/Night",
@@ -622,6 +750,7 @@ def main():
             intensity_thresh=args.intensity_thresh,
             laplacian_thresh=args.laplacian_thresh,
             prefer_name_day=not args.ignore_name_day,
+            num_workers=args.num_workers,
         )
         check_trainable_folder(data_root, scene_json=output_json)
         return
@@ -650,6 +779,30 @@ def main():
             morph_kernel=args.morph_kernel,
             bg_dilate=args.bg_dilate,
             prefer_name_day=not args.ignore_name_day,
+            num_workers=args.num_workers,
+        )
+        check_trainable_folder(data_root, scene_json=output_json)
+        return
+
+    if args.command == "pseudo-day-night-scene":
+        if args.drop_dir:
+            drop_dir = Path(args.drop_dir)
+            data_root = drop_dir.parent
+        elif args.data_root:
+            data_root = Path(args.data_root)
+            drop_dir = data_root / "Drop"
+        else:
+            raise RuntimeError("pseudo-day-night-scene needs --data-root or --drop-dir")
+
+        output_json = Path(args.output_json) if args.output_json else data_root / "Drop_dn_2scene.json"
+        output_csv = Path(args.output_csv) if args.output_csv else output_json.with_suffix(".csv")
+        generate_day_night_scene_labels(
+            drop_dir=drop_dir,
+            output_json=output_json,
+            output_csv=output_csv,
+            intensity_thresh=args.intensity_thresh,
+            prefer_name_day=not args.ignore_name_day,
+            num_workers=args.num_workers,
         )
         check_trainable_folder(data_root, scene_json=output_json)
         return

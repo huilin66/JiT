@@ -58,6 +58,11 @@ def parse_args():
     parser.add_argument("--use-bg-subnet", default="auto", choices=["auto", "0", "1"])
     parser.add_argument("--use-scene", action="store_true")
     parser.add_argument("--scene-json", default="", help="Required for --use-scene; maps filename to class id")
+    parser.add_argument("--scene-checkpoint", default="", help="Optional ConvNeXt scene checkpoint; predicts scene-json before JiT inference")
+    parser.add_argument("--scene-output-json", default="", help="Default: output-root/scene_predictions/model_timestamp_scene.json")
+    parser.add_argument("--scene-output-csv", default="", help="Default: same path as scene-output-json with .csv suffix")
+    parser.add_argument("--scene-batch-size", type=int, default=128)
+    parser.add_argument("--scene-num-workers", type=int, default=8)
     parser.add_argument("--class-num", type=int, default=0, help="0 infers from checkpoint")
     parser.add_argument("--img-size", type=int, default=0, help="0 infers from checkpoint, otherwise 256")
     parser.add_argument("--steps", type=int, default=1)
@@ -301,8 +306,38 @@ def main():
     if cli.stride <= 0 or cli.stride > img_size:
         raise ValueError(f"stride must be in [1, {img_size}]")
 
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    model_name = sanitize_name(cli.model_name or default_model_name(checkpoint_path))
+    run_name = f"{model_name}_{cli.ckpt_type}_{timestamp}"
+    output_root = Path(cli.output_root)
+
     image_files = list_input_images(cli.input_dir)
-    scene_labels = load_scene_labels(cli.scene_json, image_files, class_num) if cli.use_scene else None
+    use_scene = cli.use_scene or bool(cli.scene_checkpoint)
+    scene_json = cli.scene_json
+    if cli.scene_checkpoint:
+        from scene_tools.infer_scene_convnext import run_inference as run_scene_inference
+
+        scene_json_path = (
+            Path(cli.scene_output_json)
+            if cli.scene_output_json
+            else output_root / "scene_predictions" / f"{run_name}_scene.json"
+        )
+        scene_csv_path = Path(cli.scene_output_csv) if cli.scene_output_csv else ""
+        print(f"Scene checkpoint: {cli.scene_checkpoint}")
+        print(f"Predicting scene labels: {scene_json_path}")
+        run_scene_inference(
+            input_dir=cli.input_dir,
+            checkpoint_path=cli.scene_checkpoint,
+            output_json=scene_json_path,
+            output_csv=scene_csv_path,
+            batch_size=cli.scene_batch_size,
+            num_workers=cli.scene_num_workers,
+            device=str(device),
+            amp_dtype=cli.amp_dtype,
+            recursive=True,
+        )
+        scene_json = str(scene_json_path)
+    scene_labels = load_scene_labels(scene_json, image_files, class_num) if use_scene else None
 
     model_args = get_args_parser().parse_args([])
     model_args.model = architecture
@@ -341,10 +376,6 @@ def main():
     model.load_state_dict(state_dict, strict=True)
     model.to(device).eval()
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    model_name = sanitize_name(cli.model_name or default_model_name(checkpoint_path))
-    run_name = f"{model_name}_{cli.ckpt_type}_{timestamp}"
-    output_root = Path(cli.output_root)
     image_dir = output_root / run_name
     archive_path = output_root / f"{run_name}.zip"
     history_path = Path(cli.history_csv) if cli.history_csv else output_root / "submission_history.csv"
@@ -352,7 +383,7 @@ def main():
 
     print(f"Checkpoint: {checkpoint_path}")
     print(
-        f"State: {state_key}; model: {architecture}; scene: {cli.use_scene}; "
+        f"State: {state_key}; model: {architecture}; scene: {use_scene}; "
         f"head: {has_bg_subnet}; MSDT refiner: {has_detail_refiner}"
     )
     print(f"Images: {len(image_files)}; device: {device}; output: {archive_path}")
@@ -383,7 +414,7 @@ def main():
             "checkpoint": str(checkpoint_path.resolve()),
             "state_key": state_key,
             "architecture": architecture,
-            "use_scene": int(cli.use_scene),
+            "use_scene": int(use_scene),
             "use_bg_subnet": int(has_bg_subnet),
             "steps": cli.steps,
             "patch_size": img_size,

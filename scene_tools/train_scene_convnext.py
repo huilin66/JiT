@@ -13,13 +13,14 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from scene_convnext import (
-    CLASS_NAMES,
     SceneDataset,
     balanced_class_weights,
     build_transforms,
     class_counts,
     grouped_train_val_split,
+    infer_num_classes_from_labels,
     load_scene_samples,
+    normalize_class_names,
     save_split_manifest,
 )
 
@@ -31,6 +32,8 @@ def parse_args():
     parser.add_argument("--labels-json", default="", help="Default: data-root/Drop_scen_pred.json")
     parser.add_argument("--output-dir", default="run/scene_convnext")
     parser.add_argument("--model", default="convnext_tiny")
+    parser.add_argument("--num-classes", type=int, default=0, help="0 infers from labels-json")
+    parser.add_argument("--class-names", default="", help="Optional comma-separated class names")
     parser.add_argument("--image-size", type=int, default=448)
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--batch-size", type=int, default=64)
@@ -73,14 +76,14 @@ def create_scaler(enabled):
         return torch.cuda.amp.GradScaler(enabled=enabled)
 
 
-def run_epoch(model, loader, criterion, device, amp_dtype, optimizer=None, scaler=None):
+def run_epoch(model, loader, criterion, device, amp_dtype, num_classes, optimizer=None, scaler=None):
     training = optimizer is not None
     model.train(training)
     loss_sum = 0.0
     correct = 0
     count = 0
-    class_correct = torch.zeros(len(CLASS_NAMES), dtype=torch.long)
-    class_total = torch.zeros(len(CLASS_NAMES), dtype=torch.long)
+    class_correct = torch.zeros(num_classes, dtype=torch.long)
+    class_total = torch.zeros(num_classes, dtype=torch.long)
 
     context = torch.enable_grad if training else torch.no_grad
     with context():
@@ -104,14 +107,14 @@ def run_epoch(model, loader, criterion, device, amp_dtype, optimizer=None, scale
             loss_sum += loss.item() * batch_size
             correct += predictions.eq(labels).sum().item()
             count += batch_size
-            for class_id in CLASS_NAMES:
+            for class_id in range(num_classes):
                 mask = labels == class_id
                 class_total[class_id] += mask.sum().cpu()
                 class_correct[class_id] += predictions[mask].eq(labels[mask]).sum().cpu()
 
     per_class = {
         class_id: class_correct[class_id].item() / max(1, class_total[class_id].item())
-        for class_id in CLASS_NAMES
+        for class_id in range(num_classes)
     }
     macro_accuracy = sum(per_class.values()) / len(per_class)
     return {
@@ -122,7 +125,7 @@ def run_epoch(model, loader, criterion, device, amp_dtype, optimizer=None, scale
     }
 
 
-def save_checkpoint(path, model, optimizer, scheduler, scaler, epoch, best_accuracy, args):
+def save_checkpoint(path, model, optimizer, scheduler, scaler, epoch, best_accuracy, args, num_classes, class_names):
     torch.save(
         {
             "model": model.state_dict(),
@@ -133,8 +136,8 @@ def save_checkpoint(path, model, optimizer, scheduler, scaler, epoch, best_accur
             "best_accuracy": best_accuracy,
             "model_name": args.model,
             "image_size": args.image_size,
-            "num_classes": len(CLASS_NAMES),
-            "class_names": CLASS_NAMES,
+            "num_classes": num_classes,
+            "class_names": class_names,
             "args": vars(args),
         },
         path,
@@ -156,13 +159,16 @@ def main():
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    samples = load_scene_samples(image_dir, labels_json)
+    num_classes = args.num_classes or infer_num_classes_from_labels(labels_json)
+    class_names = normalize_class_names(num_classes, args.class_names or None)
+    samples = load_scene_samples(image_dir, labels_json, num_classes=num_classes)
     train_samples, val_samples, val_groups = grouped_train_val_split(
         samples, val_fraction=args.val_fraction, seed=args.seed
     )
     save_split_manifest(output_dir / "split_manifest.json", train_samples, val_samples, val_groups, args.seed)
-    print(f"Train: {len(train_samples)} {class_counts(train_samples)}")
-    print(f"Val: {len(val_samples)} {class_counts(val_samples)}")
+    print(f"Classes: {num_classes} {class_names}")
+    print(f"Train: {len(train_samples)} {class_counts(train_samples, num_classes)}")
+    print(f"Val: {len(val_samples)} {class_counts(val_samples, num_classes)}")
 
     train_transform, eval_transform = build_transforms(args.image_size)
     train_loader = DataLoader(
@@ -183,9 +189,9 @@ def main():
         persistent_workers=args.num_workers > 0,
     )
 
-    model = timm.create_model(args.model, pretrained=not args.no_pretrained, num_classes=len(CLASS_NAMES))
+    model = timm.create_model(args.model, pretrained=not args.no_pretrained, num_classes=num_classes)
     model.to(device)
-    class_weights = None if args.no_class_weights else balanced_class_weights(train_samples).to(device)
+    class_weights = None if args.no_class_weights else balanced_class_weights(train_samples, num_classes).to(device)
     criterion = nn.CrossEntropyLoss(weight=class_weights)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
@@ -213,8 +219,10 @@ def main():
         if write_header:
             writer.writeheader()
         for epoch in range(start_epoch, args.epochs):
-            train_metrics = run_epoch(model, train_loader, criterion, device, amp_dtype, optimizer, scaler)
-            val_metrics = run_epoch(model, val_loader, criterion, device, amp_dtype)
+            train_metrics = run_epoch(
+                model, train_loader, criterion, device, amp_dtype, num_classes, optimizer, scaler
+            )
+            val_metrics = run_epoch(model, val_loader, criterion, device, amp_dtype, num_classes)
             lr = optimizer.param_groups[0]["lr"]
             scheduler.step()
             print(
@@ -240,12 +248,12 @@ def main():
                 best_accuracy = val_metrics["macro_accuracy"]
             save_checkpoint(
                 output_dir / "checkpoint-last.pth",
-                model, optimizer, scheduler, scaler, epoch, best_accuracy, args,
+                model, optimizer, scheduler, scaler, epoch, best_accuracy, args, num_classes, class_names,
             )
             if is_best:
                 save_checkpoint(
                     output_dir / "checkpoint-best.pth",
-                    model, optimizer, scheduler, scaler, epoch, best_accuracy, args,
+                    model, optimizer, scheduler, scaler, epoch, best_accuracy, args, num_classes, class_names,
                 )
                 print(f"Saved new best checkpoint: macro_acc={best_accuracy:.4f}")
 

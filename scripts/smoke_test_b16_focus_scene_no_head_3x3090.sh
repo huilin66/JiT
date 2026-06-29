@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Smoke test 2scene and 4scene focus-label no-head runs on 3 GPUs.
+# Smoke test focus/scene no-head runs on 3 GPUs.
 
 DATA_ROOT=${DATA_ROOT:-/root/huilin/data/eccv_dn}
 
@@ -72,5 +72,6 @@ run_smoke() {
 
 run_smoke "2scene" "${SCENE_2_PATH:-${DATA_PATH}/Drop_focus_2scene.json}" "$((MASTER_PORT_BASE + 0))"
 run_smoke "4scene" "${SCENE_4_PATH:-${DATA_PATH}/Drop_focus_4scene.json}" "$((MASTER_PORT_BASE + 1))"
+run_smoke "dn_2scene" "${SCENE_DN_2_PATH:-${DATA_PATH}/Drop_dn_2scene.json}" "$((MASTER_PORT_BASE + 2))"
 
-echo "2scene and 4scene focus no-head smoke tests passed."
+echo "2scene, 4scene, and dn_2scene no-head smoke tests passed."

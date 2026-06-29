@@ -36,10 +36,51 @@ def list_images(root, recursive=True):
     return files
 
 
-def load_scene_samples(image_dir, labels_json, recursive=True):
-    image_files = list_images(image_dir, recursive=recursive)
+def load_label_dict(labels_json):
     with open(labels_json, "r", encoding="utf-8") as file:
         labels = json.load(file)
+    return {name: int(label) for name, label in labels.items()}
+
+
+def infer_num_classes_from_labels(labels_json):
+    labels = load_label_dict(labels_json)
+    if not labels:
+        raise RuntimeError(f"Scene JSON is empty: {labels_json}")
+    min_label = min(labels.values())
+    max_label = max(labels.values())
+    if min_label < 0:
+        raise ValueError(f"Scene labels must be non-negative, got {min_label}")
+    return max_label + 1
+
+
+def normalize_class_names(num_classes, class_names=None):
+    if class_names is None:
+        if num_classes == len(CLASS_NAMES):
+            return dict(CLASS_NAMES)
+        return {class_id: f"class_{class_id}" for class_id in range(num_classes)}
+    if isinstance(class_names, str):
+        names = [name.strip() for name in class_names.split(",") if name.strip()]
+        if len(names) != num_classes:
+            raise ValueError(
+                f"Expected {num_classes} comma-separated class names, got {len(names)}"
+            )
+        return {class_id: names[class_id] for class_id in range(num_classes)}
+    if isinstance(class_names, dict):
+        normalized = {int(key): str(value) for key, value in class_names.items()}
+    else:
+        normalized = {index: str(value) for index, value in enumerate(class_names)}
+    missing = [class_id for class_id in range(num_classes) if class_id not in normalized]
+    if missing:
+        raise ValueError(f"Missing class names for class ids: {missing}")
+    return {class_id: normalized[class_id] for class_id in range(num_classes)}
+
+
+def load_scene_samples(image_dir, labels_json, recursive=True, num_classes=None):
+    image_files = list_images(image_dir, recursive=recursive)
+    labels = load_label_dict(labels_json)
+    if num_classes is None or int(num_classes) <= 0:
+        num_classes = infer_num_classes_from_labels(labels_json)
+    num_classes = int(num_classes)
 
     missing = [path.name for path in image_files if path.name not in labels]
     if missing:
@@ -48,8 +89,10 @@ def load_scene_samples(image_dir, labels_json, recursive=True):
     samples = []
     for path in image_files:
         label = int(labels[path.name])
-        if label not in CLASS_NAMES:
-            raise ValueError(f"Invalid scene class {label} for {path.name}")
+        if label < 0 or label >= num_classes:
+            raise ValueError(
+                f"Invalid scene class {label} for {path.name}; num_classes={num_classes}"
+            )
         samples.append((path, label))
     return samples
 
@@ -152,16 +195,18 @@ class SceneInferenceDataset(Dataset):
         return image, path.name
 
 
-def class_counts(samples):
+def class_counts(samples, num_classes=None):
+    if num_classes is None:
+        num_classes = max([label for _, label in samples] or [len(CLASS_NAMES) - 1]) + 1
     counts = Counter(label for _, label in samples)
-    return {class_id: counts.get(class_id, 0) for class_id in CLASS_NAMES}
+    return {class_id: counts.get(class_id, 0) for class_id in range(int(num_classes))}
 
 
-def balanced_class_weights(samples):
-    counts = class_counts(samples)
+def balanced_class_weights(samples, num_classes=None):
+    counts = class_counts(samples, num_classes=num_classes)
     if any(count == 0 for count in counts.values()):
         missing = [class_id for class_id, count in counts.items() if count == 0]
         raise RuntimeError(f"Training split has no samples for scene classes: {missing}")
     total = sum(counts.values())
-    weights = [total / (len(CLASS_NAMES) * counts[class_id]) for class_id in CLASS_NAMES]
+    weights = [total / (len(counts) * counts[class_id]) for class_id in counts]
     return torch.tensor(weights, dtype=torch.float32)
