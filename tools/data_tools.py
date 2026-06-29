@@ -732,6 +732,45 @@ def extract_sample_images(
     print(f"Extracted {count} sample images to {dest_dir}")
 
 
+def extract_drop_scene_samples(data_root, dest_root, scene_csv):
+    data_root = Path(data_root)
+    dest_root = Path(dest_root)
+    scene_csv = Path(scene_csv) if scene_csv else dest_root / "sample_scene_4way.csv"
+    ensure_dir(dest_root)
+
+    tasks = [
+        (
+            data_root / "DayRainDrop_Train" / "Drop",
+            dest_root / "day" / "drop",
+            "write",
+        ),
+        (
+            data_root / "NightRainDrop_Train" / "Drop",
+            dest_root / "night" / "drop",
+            "append",
+        ),
+    ]
+
+    ran = 0
+    for source_dir, dest_dir, csv_mode in tasks:
+        if not source_dir.is_dir():
+            print(f"[samples] skip missing directory: {source_dir}")
+            continue
+        extract_sample_images(
+            source_dir=source_dir,
+            dest_dir=dest_dir,
+            recursive=True,
+            keep_tree=True,
+            scene_csv=scene_csv,
+            scene_csv_mode=csv_mode,
+        )
+        ran += 1
+
+    if ran == 0:
+        raise RuntimeError(f"No Day/Night Drop folders found below: {data_root}")
+    print(f"Drop sample check finished. Images: {dest_root}; CSV: {scene_csv}")
+
+
 def convert_manual_labels(input_excel, output_csv):
     input_excel = Path(input_excel)
     output_csv = Path(output_csv)
@@ -856,6 +895,18 @@ def build_parser():
         help="Use write for the first source and append for later sources.",
     )
 
+    drop_sample_parser = subparsers.add_parser(
+        "drop-scene-samples",
+        help="Extract first Drop image per folder and write 4-way scene CSV",
+    )
+    drop_sample_parser.add_argument("--data-root", required=True)
+    drop_sample_parser.add_argument("--dest-root", required=True)
+    drop_sample_parser.add_argument(
+        "--scene-csv",
+        default="",
+        help="Default: dest-root/sample_scene_4way.csv",
+    )
+
     manual_parser = subparsers.add_parser("manual-labels", help="Convert manual Excel labels to csv")
     manual_parser.add_argument("--input-excel", required=True)
     manual_parser.add_argument("--output-csv", required=True)
@@ -975,6 +1026,10 @@ def main():
             scene_csv=args.scene_csv,
             scene_csv_mode=args.scene_csv_mode,
         )
+        return
+
+    if args.command == "drop-scene-samples":
+        extract_drop_scene_samples(args.data_root, args.dest_root, args.scene_csv)
         return
 
     if args.command == "manual-labels":
