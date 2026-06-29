@@ -32,7 +32,6 @@ python tools/data_tools.py manual-blur-scenes \
   --manual-csv "${MANUAL_BLUR_CSV}" \
   --output-2-json "${DATA_ROOT}/RainDrop_Train/Drop_blur_2scene.json" \
   --output-4-json "${DATA_ROOT}/RainDrop_Train/Drop_dn_blur_4scene.json"
-fi
 
 python tools/data_tools.py pseudo-scene \
   --data-root "${DATA_ROOT}/RainDrop_Train" \
