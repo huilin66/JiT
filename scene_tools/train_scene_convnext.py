@@ -16,6 +16,7 @@ from tqdm import tqdm
 from scene_convnext import (
     SceneDataset,
     balanced_class_weights,
+    build_balanced_sampler,
     build_transforms,
     class_counts,
     grouped_train_val_split,
@@ -41,12 +42,18 @@ def parse_args():
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--weight-decay", type=float, default=1e-4)
     parser.add_argument("--val-fraction", type=float, default=0.1)
+    parser.add_argument("--min-train-per-class", type=int, default=5)
     parser.add_argument("--num-workers", type=int, default=8)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--amp-dtype", default="auto", choices=["auto", "bf16", "fp16", "fp32"])
     parser.add_argument("--no-pretrained", action="store_true")
     parser.add_argument("--no-class-weights", action="store_true")
+    parser.add_argument("--class-weight-power", type=float, default=0.5)
+    parser.add_argument("--max-class-weight", type=float, default=10.0)
+    parser.add_argument("--sampler", default="balanced", choices=["balanced", "none"])
+    parser.add_argument("--sample-weight-power", type=float, default=1.0)
+    parser.add_argument("--max-sample-weight-ratio", type=float, default=0.0)
     parser.add_argument("--resume", default="")
     return parser.parse_args()
 
@@ -181,7 +188,10 @@ def main():
     class_names = normalize_class_names(num_classes, args.class_names or None)
     samples = load_scene_samples(image_dir, labels_json, num_classes=num_classes)
     train_samples, val_samples, val_groups = grouped_train_val_split(
-        samples, val_fraction=args.val_fraction, seed=args.seed
+        samples,
+        val_fraction=args.val_fraction,
+        seed=args.seed,
+        min_train_per_class=args.min_train_per_class,
     )
     save_split_manifest(output_dir / "split_manifest.json", train_samples, val_samples, val_groups, args.seed)
     print(f"Classes: {num_classes} {class_names}")
@@ -189,14 +199,32 @@ def main():
     val_counts = class_counts(val_samples, num_classes)
     if any(count == 0 for count in val_counts.values()):
         print(f"Warning: validation split has empty classes: {val_counts}")
+    if any(count == 0 for count in train_counts.values()):
+        raise RuntimeError(f"Training split has empty classes: {train_counts}")
     print(f"Train: {len(train_samples)} {train_counts}")
     print(f"Val: {len(val_samples)} {val_counts}")
+    nonzero_train_counts = [count for count in train_counts.values() if count > 0]
+    imbalance_ratio = max(nonzero_train_counts) / max(1, min(nonzero_train_counts))
+    print(f"Train imbalance ratio: {imbalance_ratio:.2f}x")
 
     train_transform, eval_transform = build_transforms(args.image_size)
+    train_sampler = None
+    if args.sampler == "balanced":
+        train_sampler = build_balanced_sampler(
+            train_samples,
+            num_classes,
+            power=args.sample_weight_power,
+            max_weight=args.max_sample_weight_ratio,
+        )
+        print(
+            "Using balanced train sampler: "
+            f"power={args.sample_weight_power}, max_weight_ratio={args.max_sample_weight_ratio}"
+        )
     train_loader = DataLoader(
         SceneDataset(train_samples, train_transform),
         batch_size=args.batch_size,
-        shuffle=True,
+        shuffle=train_sampler is None,
+        sampler=train_sampler,
         num_workers=args.num_workers,
         pin_memory=device.type == "cuda",
         drop_last=False,
@@ -213,7 +241,15 @@ def main():
 
     model = timm.create_model(args.model, pretrained=not args.no_pretrained, num_classes=num_classes)
     model.to(device)
-    class_weights = None if args.no_class_weights else balanced_class_weights(train_samples, num_classes).to(device)
+    class_weights = None
+    if not args.no_class_weights:
+        class_weights = balanced_class_weights(
+            train_samples,
+            num_classes,
+            power=args.class_weight_power,
+            max_weight=args.max_class_weight,
+        ).to(device)
+        print(f"Class weights: {[round(float(weight), 4) for weight in class_weights.cpu()]}")
     criterion = nn.CrossEntropyLoss(weight=class_weights)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)

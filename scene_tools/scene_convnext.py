@@ -5,7 +5,7 @@ from pathlib import Path
 
 import torch
 from PIL import Image
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, WeightedRandomSampler
 from torchvision import transforms
 
 
@@ -107,7 +107,7 @@ def scene_group_key(path):
     return Path(path).stem
 
 
-def grouped_train_val_split(samples, val_fraction=0.1, seed=42):
+def grouped_train_val_split(samples, val_fraction=0.1, seed=42, min_train_per_class=5):
     groups = {}
     for sample in samples:
         groups.setdefault(scene_group_key(sample[0]), []).append(sample)
@@ -127,6 +127,11 @@ def grouped_train_val_split(samples, val_fraction=0.1, seed=42):
         for class_id, count in total_counts.items()
         if count > 0
     }
+    min_train_counts = {
+        class_id: min(max(1, int(min_train_per_class)), max(1, count - 1))
+        for class_id, count in total_counts.items()
+        if count > 0
+    }
 
     val_groups = set()
     val_counts = Counter()
@@ -141,11 +146,24 @@ def grouped_train_val_split(samples, val_fraction=0.1, seed=42):
             group_name for group_name in group_names
             if group_name not in val_groups and group_label_counts[group_name][class_id] > 0
         ]
-        candidates.sort(key=lambda group_name: group_label_counts[group_name][class_id], reverse=True)
+        candidates.sort(
+            key=lambda group_name: (
+                abs(group_label_counts[group_name][class_id] - target_counts[class_id]),
+                group_label_counts[group_name][class_id],
+                len(groups[group_name]),
+            )
+        )
         while val_counts[class_id] < target_counts[class_id] and candidates:
             group_name = candidates.pop(0)
+            candidate_counts = val_counts + group_label_counts[group_name]
+            train_counts_after = total_counts - candidate_counts
+            if any(
+                train_counts_after[train_class] < min_train_counts[train_class]
+                for train_class in min_train_counts
+            ):
+                continue
             val_groups.add(group_name)
-            val_counts.update(group_label_counts[group_name])
+            val_counts = candidate_counts
 
     if not val_groups:
         val_groups.add(group_names[0])
@@ -237,11 +255,42 @@ def class_counts(samples, num_classes=None):
     return {class_id: counts.get(class_id, 0) for class_id in range(int(num_classes))}
 
 
-def balanced_class_weights(samples, num_classes=None):
+def balanced_class_weights(samples, num_classes=None, power=0.5, max_weight=10.0):
     counts = class_counts(samples, num_classes=num_classes)
     if any(count == 0 for count in counts.values()):
         missing = [class_id for class_id, count in counts.items() if count == 0]
         raise RuntimeError(f"Training split has no samples for scene classes: {missing}")
     total = sum(counts.values())
-    weights = [total / (len(counts) * counts[class_id]) for class_id in counts]
+    weights = []
+    for class_id in counts:
+        weight = total / (len(counts) * counts[class_id])
+        weight = weight ** float(power)
+        if max_weight and max_weight > 0:
+            weight = min(weight, float(max_weight))
+        weights.append(weight)
+    mean_weight = sum(weights) / len(weights)
+    weights = [weight / mean_weight for weight in weights]
     return torch.tensor(weights, dtype=torch.float32)
+
+
+def balanced_sample_weights(samples, num_classes=None, power=1.0, max_weight=0.0):
+    counts = class_counts(samples, num_classes=num_classes)
+    if any(count == 0 for count in counts.values()):
+        missing = [class_id for class_id, count in counts.items() if count == 0]
+        raise RuntimeError(f"Training split has no samples for scene classes: {missing}")
+    weights = [(1.0 / counts[label]) ** float(power) for _, label in samples]
+    if max_weight and max_weight > 0:
+        min_weight = min(weights)
+        cap = min_weight * float(max_weight)
+        weights = [min(weight, cap) for weight in weights]
+    return weights
+
+
+def build_balanced_sampler(samples, num_classes=None, power=1.0, max_weight=0.0):
+    weights = balanced_sample_weights(
+        samples,
+        num_classes=num_classes,
+        power=power,
+        max_weight=max_weight,
+    )
+    return WeightedRandomSampler(weights, num_samples=len(samples), replacement=True)
