@@ -124,11 +124,17 @@ def run_epoch(model, loader, criterion, device, amp_dtype, num_classes, optimize
                 class_total[class_id] += mask.sum().cpu()
                 class_correct[class_id] += predictions[mask].eq(labels[mask]).sum().cpu()
 
-    per_class = {
-        class_id: class_correct[class_id].item() / max(1, class_total[class_id].item())
-        for class_id in range(num_classes)
-    }
-    macro_accuracy = sum(per_class.values()) / len(per_class)
+    per_class = {}
+    present_class_acc = []
+    for class_id in range(num_classes):
+        total = class_total[class_id].item()
+        if total > 0:
+            accuracy = class_correct[class_id].item() / total
+            present_class_acc.append(accuracy)
+        else:
+            accuracy = None
+        per_class[class_id] = accuracy
+    macro_accuracy = sum(present_class_acc) / max(1, len(present_class_acc))
     return {
         "loss": loss_sum / max(1, count),
         "accuracy": correct / max(1, count),
@@ -179,8 +185,12 @@ def main():
     )
     save_split_manifest(output_dir / "split_manifest.json", train_samples, val_samples, val_groups, args.seed)
     print(f"Classes: {num_classes} {class_names}")
-    print(f"Train: {len(train_samples)} {class_counts(train_samples, num_classes)}")
-    print(f"Val: {len(val_samples)} {class_counts(val_samples, num_classes)}")
+    train_counts = class_counts(train_samples, num_classes)
+    val_counts = class_counts(val_samples, num_classes)
+    if any(count == 0 for count in val_counts.values()):
+        print(f"Warning: validation split has empty classes: {val_counts}")
+    print(f"Train: {len(train_samples)} {train_counts}")
+    print(f"Val: {len(val_samples)} {val_counts}")
 
     train_transform, eval_transform = build_transforms(args.image_size)
     train_loader = DataLoader(

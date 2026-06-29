@@ -114,11 +114,46 @@ def grouped_train_val_split(samples, val_fraction=0.1, seed=42):
     if len(groups) < 2:
         raise RuntimeError("At least two scene groups are required for train/validation split")
 
+    rng = random.Random(seed)
     group_names = sorted(groups)
-    random.Random(seed).shuffle(group_names)
-    val_count = max(1, round(len(group_names) * val_fraction))
-    val_count = min(val_count, len(group_names) - 1)
-    val_groups = set(group_names[:val_count])
+    rng.shuffle(group_names)
+    group_label_counts = {
+        group_name: Counter(label for _, label in group_samples)
+        for group_name, group_samples in groups.items()
+    }
+    total_counts = Counter(label for _, label in samples)
+    target_counts = {
+        class_id: max(1, round(count * val_fraction))
+        for class_id, count in total_counts.items()
+        if count > 0
+    }
+
+    val_groups = set()
+    val_counts = Counter()
+    class_order = sorted(
+        target_counts,
+        key=lambda class_id: sum(
+            1 for group_count in group_label_counts.values() if group_count[class_id] > 0
+        ),
+    )
+    for class_id in class_order:
+        candidates = [
+            group_name for group_name in group_names
+            if group_name not in val_groups and group_label_counts[group_name][class_id] > 0
+        ]
+        candidates.sort(key=lambda group_name: group_label_counts[group_name][class_id], reverse=True)
+        while val_counts[class_id] < target_counts[class_id] and candidates:
+            group_name = candidates.pop(0)
+            val_groups.add(group_name)
+            val_counts.update(group_label_counts[group_name])
+
+    if not val_groups:
+        val_groups.add(group_names[0])
+    if len(val_groups) >= len(groups):
+        # Keep at least one group for training, preferring to return the largest
+        # validation group back to train.
+        largest_group = max(val_groups, key=lambda group_name: len(groups[group_name]))
+        val_groups.remove(largest_group)
 
     train_samples = []
     val_samples = []
