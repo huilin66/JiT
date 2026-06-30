@@ -18,6 +18,7 @@ from tqdm import tqdm
 
 
 CSV_FIELDS = [
+    "id",
     "timestamp",
     "model_name",
     "prediction_dir",
@@ -73,11 +74,27 @@ def append_csv(path: str, row: dict):
     csv_path = Path(path)
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     write_header = not csv_path.exists() or csv_path.stat().st_size == 0
+    existing_count = 0
     if not write_header:
         with csv_path.open("r", encoding="utf-8-sig", newline="") as handle:
-            header = next(csv.reader(handle), [])
-        if header != CSV_FIELDS:
+            reader = csv.DictReader(handle)
+            header = reader.fieldnames or []
+            existing_rows = list(reader)
+        if header == CSV_FIELDS[1:]:
+            for index, existing in enumerate(existing_rows, 1):
+                existing["id"] = str(index)
+            with csv_path.open("w", encoding="utf-8-sig", newline="") as handle:
+                writer = csv.DictWriter(handle, fieldnames=CSV_FIELDS)
+                writer.writeheader()
+                writer.writerows(existing_rows)
+            existing_count = len(existing_rows)
+        elif header == CSV_FIELDS:
+            existing_count = len(existing_rows)
+        else:
             raise RuntimeError(f"Existing CSV has incompatible header: {csv_path}")
+    else:
+        existing_count = 0
+    row["id"] = str(existing_count + 1)
     with csv_path.open("a", encoding="utf-8-sig", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=CSV_FIELDS)
         if write_header:
@@ -125,6 +142,7 @@ def main():
     runtime = time.perf_counter() - started
     metrics = {key: value / count for key, value in totals.items()}
     row = {
+        "id": "",
         "timestamp": time.strftime("%Y%m%d_%H%M%S"),
         "model_name": args.model_name or prediction_dir.name,
         "prediction_dir": str(prediction_dir.resolve()),
