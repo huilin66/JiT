@@ -8,10 +8,12 @@ DATA_ROOT=${DATA_ROOT:-D:/zhl/data/eccv_dn}
 INPUT_DIR=${INPUT_DIR:-${DATA_ROOT}/Drop}
 OUTPUT_ROOT=${OUTPUT_ROOT:-submissions/final_single}
 HISTORY_CSV=${HISTORY_CSV:-${OUTPUT_ROOT}/submission_history.csv}
+SWEEP_DIR=${SWEEP_DIR:-submissions/local_val_sweep}
 
-CONFIG_CSV=${CONFIG_CSV:-}
+CONFIG_CSV=${CONFIG_CSV:-${SWEEP_DIR}/local_val_sweep.csv}
 CONFIG_ROW=${CONFIG_ROW:-}
 CONFIG_MODEL_NAME=${CONFIG_MODEL_NAME:-}
+
 
 JIT_CKPT=${JIT_CKPT:-run/ablation_b16_3x3090/b16_focus_2scene_no_head}
 JIT_CKPT_TYPE=${JIT_CKPT_TYPE:-best}
@@ -21,12 +23,12 @@ STRIDE=${STRIDE:-128}
 
 SCENE_CKPT=${SCENE_CKPT:-run/scene_convnext_focus_2scene_v1/checkpoint-best.pth}
 SCENE_JSON=${SCENE_JSON:-}
-SCENE_BATCH_SIZE=${SCENE_BATCH_SIZE:-128}
+SCENE_BATCH_SIZE=${SCENE_BATCH_SIZE:-8}
 SCENE_NUM_WORKERS=${SCENE_NUM_WORKERS:-8}
 
 MODEL_NAME=${MODEL_NAME:-}
 MODEL_NAME_PREFIX=${MODEL_NAME_PREFIX:-jit_submit}
-TILE_BATCH_SIZE=${TILE_BATCH_SIZE:-32}
+TILE_BATCH_SIZE=${TILE_BATCH_SIZE:-8}
 DEVICE=${DEVICE:-cuda:0}
 AMP_DTYPE=${AMP_DTYPE:-auto}
 NOTES=${NOTES:-submit_from_local_config}
