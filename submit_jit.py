@@ -68,6 +68,8 @@ def parse_args():
     parser.add_argument("--steps", type=int, default=1)
     parser.add_argument("--stride", type=int, default=128)
     parser.add_argument("--tile-batch-size", type=int, default=32)
+    parser.add_argument("--tta-hflip", action="store_true", help="Average original and horizontal-flip inference.")
+    parser.add_argument("--tta-vflip", action="store_true", help="Average original and vertical-flip inference.")
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--amp-dtype", default="auto", choices=["auto", "bf16", "fp16", "fp32"])
     parser.add_argument("--submission-info", default="readme.txt", help="Optional file added to ZIP; empty disables it")
@@ -221,12 +223,7 @@ def autocast_context(device, amp_dtype):
     return torch.autocast(device_type="cuda", dtype=dtype)
 
 
-@torch.inference_mode()
-def restore_image(model, image_path, device, patch_size, stride, tile_batch_size, steps, scene_id, amp_dtype):
-    image = Image.open(image_path).convert("RGB")
-    array = np.array(image, dtype=np.float32, copy=True)
-    tensor = torch.from_numpy(array).permute(2, 0, 1).unsqueeze(0).div_(255.0)
-    tensor = tensor.mul_(2.0).sub_(1.0)
+def restore_tensor(model, tensor, device, patch_size, stride, tile_batch_size, steps, scene_id, amp_dtype):
     tensor, original_size = pad_to_patch(tensor, patch_size)
     _, _, height, width = tensor.shape
 
@@ -255,7 +252,54 @@ def restore_image(model, image_path, device, patch_size, stride, tile_batch_size
 
     output = output.div_(weights.clamp_min_(1e-8)).clamp_(-1.0, 1.0)
     original_h, original_w = original_size
-    output = output[:, :, :original_h, :original_w]
+    return output[:, :, :original_h, :original_w]
+
+
+@torch.inference_mode()
+def restore_image(
+    model,
+    image_path,
+    device,
+    patch_size,
+    stride,
+    tile_batch_size,
+    steps,
+    scene_id,
+    amp_dtype,
+    tta_hflip=False,
+    tta_vflip=False,
+):
+    image = Image.open(image_path).convert("RGB")
+    array = np.array(image, dtype=np.float32, copy=True)
+    tensor = torch.from_numpy(array).permute(2, 0, 1).unsqueeze(0).div_(255.0)
+    tensor = tensor.mul_(2.0).sub_(1.0)
+
+    variants = [(tensor, ())]
+    if tta_hflip:
+        variants.append((tensor.flip(-1), (-1,)))
+    if tta_vflip:
+        variants.append((tensor.flip(-2), (-2,)))
+    if tta_hflip and tta_vflip:
+        variants.append((tensor.flip((-2, -1)), (-2, -1)))
+
+    outputs = []
+    for variant, inverse_dims in variants:
+        prediction = restore_tensor(
+            model=model,
+            tensor=variant,
+            device=device,
+            patch_size=patch_size,
+            stride=stride,
+            tile_batch_size=tile_batch_size,
+            steps=steps,
+            scene_id=scene_id,
+            amp_dtype=amp_dtype,
+        )
+        if inverse_dims:
+            prediction = prediction.flip(inverse_dims)
+        outputs.append(prediction)
+
+    output = torch.stack(outputs, dim=0).mean(dim=0).clamp_(-1.0, 1.0)
     output = output.add(1.0).mul_(127.5).round_().clamp_(0, 255).to(torch.uint8)
     return Image.fromarray(output[0].permute(1, 2, 0).numpy(), mode="RGB")
 
@@ -400,6 +444,8 @@ def main():
             steps=cli.steps,
             scene_id=scene_id,
             amp_dtype=cli.amp_dtype,
+            tta_hflip=cli.tta_hflip,
+            tta_vflip=cli.tta_vflip,
         )
         prediction.save(image_dir / f"{image_path.stem}.png", format="PNG", optimize=True)
     runtime = time.perf_counter() - started
@@ -429,6 +475,7 @@ def main():
             "score": "",
             "notes": (
                 f"detail_refiner={int(has_detail_refiner)}"
+                f"; tta_hflip={int(cli.tta_hflip)}; tta_vflip={int(cli.tta_vflip)}"
                 + (f"; {cli.notes}" if cli.notes else "")
             ),
         },
