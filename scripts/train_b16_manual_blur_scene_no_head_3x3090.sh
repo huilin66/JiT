@@ -94,7 +94,7 @@ run_exp() {
     "${online_eval_args[@]}"
 }
 
-run_exp "blur_2scene" "${SCENE_BLUR_2_PATH:-${DATA_PATH}/Drop_blur_2scene.json}" "$((MASTER_PORT_BASE + 0))"
 run_exp "dn_blur_4scene" "${SCENE_DN_BLUR_4_PATH:-${DATA_PATH}/Drop_dn_blur_4scene.json}" "$((MASTER_PORT_BASE + 1))"
+run_exp "blur_2scene" "${SCENE_BLUR_2_PATH:-${DATA_PATH}/Drop_blur_2scene.json}" "$((MASTER_PORT_BASE + 0))"
 
 echo "Manual blur scene training finished."
