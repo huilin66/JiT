@@ -111,7 +111,7 @@ run_exp() {
     "${online_eval_args[@]}"
 }
 
-run_exp "dn_blur_4scene" "${SCENE_DN_BLUR_4_PATH:-${DATA_PATH}/Drop_dn_blur_4scene.json}" "$((MASTER_PORT_BASE + 0))" 0.0 0.0
+# run_exp "dn_blur_4scene" "${SCENE_DN_BLUR_4_PATH:-${DATA_PATH}/Drop_dn_blur_4scene.json}" "$((MASTER_PORT_BASE + 0))" 0.0 0.0
 run_exp "dn_blur_4scene_edge_freq" "${SCENE_DN_BLUR_4_PATH:-${DATA_PATH}/Drop_dn_blur_4scene.json}" "$((MASTER_PORT_BASE + 1))" "${LOSS_EDGE_WEIGHT}" "${LOSS_FREQ_WEIGHT}"
 
 echo "dn_blur_4scene augmented 1x5090 training finished."

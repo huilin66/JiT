@@ -7,8 +7,8 @@ set -euo pipefail
 
 DATA_ROOT=${DATA_ROOT:-D:/zhl/data/eccv_dn}
 DATA_PATH=${DATA_PATH:-${DATA_ROOT}/RainDrop_Train}
-VAL_ROOT=${VAL_ROOT:-${DATA_ROOT}/jit_local_val_100}
-VAL_NUM_IMAGES=${VAL_NUM_IMAGES:-100}
+VAL_ROOT=${VAL_ROOT:-${DATA_ROOT}/jit_local_val_200}
+VAL_NUM_IMAGES=${VAL_NUM_IMAGES:-200}
 VAL_SEED=${VAL_SEED:-2026}
 
 JIT_CKPT=${JIT_CKPT:-run/ablation_b16_3x3090/b16_focus_2scene_no_head}
@@ -16,9 +16,9 @@ SCENE_CKPT=${SCENE_CKPT:-run/scene_convnext_focus_2scene_v1/checkpoint-best.pth}
 SOURCE_SCENE_JSON=${SOURCE_SCENE_JSON:-}
 SCENE_JSON=${SCENE_JSON:-}
 
-OUTPUT_ROOT=${OUTPUT_ROOT:-submissions/local_val_sweep}
-LOCAL_CSV=${LOCAL_CSV:-${OUTPUT_ROOT}/local_val_sweep.csv}
-SUBMIT_HISTORY_CSV=${SUBMIT_HISTORY_CSV:-${OUTPUT_ROOT}/submission_history.csv}
+OUTPUT_ROOT=${OUTPUT_ROOT:-submissions/local_val_sweep_200}
+LOCAL_CSV=${LOCAL_CSV:-${OUTPUT_ROOT}/local_val_sweep_200.csv}
+SUBMIT_HISTORY_CSV=${SUBMIT_HISTORY_CSV:-${OUTPUT_ROOT}/submission_history_200.csv}
 
 MODEL_NAME_PREFIX=${MODEL_NAME_PREFIX:-jit_local}
 JIT_CKPT_TYPES=${JIT_CKPT_TYPES:-best,last}

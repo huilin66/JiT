@@ -6,12 +6,12 @@ set -euo pipefail
 
 DATA_ROOT=${DATA_ROOT:-D:/zhl/data/eccv_dn}
 INPUT_DIR=${INPUT_DIR:-${DATA_ROOT}/Drop}
-OUTPUT_ROOT=${OUTPUT_ROOT:-submissions/final_single}
+OUTPUT_ROOT=${OUTPUT_ROOT:-submissions}
 HISTORY_CSV=${HISTORY_CSV:-${OUTPUT_ROOT}/submission_history.csv}
 SWEEP_DIR=${SWEEP_DIR:-submissions/local_val_sweep}
 
 CONFIG_CSV=${CONFIG_CSV:-${SWEEP_DIR}/local_val_sweep.csv}
-CONFIG_ROW=${CONFIG_ROW:-}
+CONFIG_ROW=${CONFIG_ROW:-2}
 CONFIG_MODEL_NAME=${CONFIG_MODEL_NAME:-}
 
 

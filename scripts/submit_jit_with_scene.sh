@@ -5,9 +5,9 @@ set -euo pipefail
 
 DATA_ROOT=${DATA_ROOT:-D:/zhl/data/eccv_dn}
 INPUT_DIR=${INPUT_DIR:-${DATA_ROOT}/Drop}
-JIT_CKPT=${JIT_CKPT:-run/ablation_b16_3x3090/b16_focus_2scene_no_head}
+JIT_CKPT=${JIT_CKPT:-run/ablation_b16_3x3090/b16_dn_blur_4scene_no_head}
 JIT_CKPT_TYPE=${JIT_CKPT_TYPE:-best}
-SCENE_CKPT=${SCENE_CKPT:-run/scene_convnext_focus_2scene_v1/checkpoint-best.pth}
+SCENE_CKPT=${SCENE_CKPT:-run/scene_convnext_dn_blur_4scene/checkpoint-best.pth}
 SCENE_JSON=${SCENE_JSON:-}
 OUTPUT_ROOT=${OUTPUT_ROOT:-submissions}
 
@@ -19,10 +19,10 @@ JIT_CKPT_TYPES=${JIT_CKPT_TYPES:-${JIT_CKPT_TYPE}}
 STATE_KEYS=${STATE_KEYS:-${STATE_KEY}}
 STEPS_LIST=${STEPS_LIST:-${STEPS}}
 STRIDES=${STRIDES:-${STRIDE}}
-TILE_BATCH_SIZE=${TILE_BATCH_SIZE:-32}
+TILE_BATCH_SIZE=${TILE_BATCH_SIZE:-8}
 DEVICE=${DEVICE:-cuda:0}
 AMP_DTYPE=${AMP_DTYPE:-auto}
-SCENE_BATCH_SIZE=${SCENE_BATCH_SIZE:-128}
+SCENE_BATCH_SIZE=${SCENE_BATCH_SIZE:-8}
 SCENE_NUM_WORKERS=${SCENE_NUM_WORKERS:-8}
 NOTES=${NOTES:-auto_scene_convnext}
 
