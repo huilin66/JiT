@@ -44,7 +44,7 @@ def main():
     emit("STRIDES", row.get("stride", "128"))
     emit("TILE_BATCH_SIZE", row.get("tile_batch_size", "32"))
     emit("SCENE_JSON", row.get("scene_json", ""))
-    emit("MODEL_NAME_PREFIX", f"replay_{row.get('model_name', 'jit')}")
+    emit("CONFIG_SOURCE_MODEL_NAME", row.get("model_name", ""))
     emit("NOTES", f"replay from {args.csv}")
 
 

@@ -40,7 +40,8 @@ if [[ -n "${CONFIG_CSV}" ]]; then
   if [[ -n "${CONFIG_MODEL_NAME}" ]]; then
     row_args+=(--model-name "${CONFIG_MODEL_NAME}")
   else
-    row_args+=(--row "${CONFIG_ROW:-1}")
+    CONFIG_ROW="${CONFIG_ROW:-1}"
+    row_args+=(--row "${CONFIG_ROW}")
   fi
   eval "$(python tools/local_sweep_row_to_env.py "${row_args[@]}")"
   JIT_CKPT_TYPE="${JIT_CKPT_TYPES}"
@@ -55,7 +56,11 @@ if [[ -n "${CONFIG_CSV}" ]]; then
 fi
 
 if [[ -z "${MODEL_NAME}" ]]; then
-  MODEL_NAME="${MODEL_NAME_PREFIX}_${JIT_CKPT_TYPE}_${STATE_KEY}_s${STEPS}_r${STRIDE}"
+  if [[ -n "${CONFIG_ROW}" || -n "${CONFIG_MODEL_NAME}" ]]; then
+    MODEL_NAME="submit_${JIT_CKPT_TYPE}_${STATE_KEY}_s${STEPS}_r${STRIDE}"
+  else
+    MODEL_NAME="${MODEL_NAME_PREFIX}_${JIT_CKPT_TYPE}_${STATE_KEY}_s${STEPS}_r${STRIDE}"
+  fi
 fi
 
 scene_args=()
