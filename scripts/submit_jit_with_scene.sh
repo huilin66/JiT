@@ -3,11 +3,11 @@ set -euo pipefail
 
 # One-step submission: predict scene labels with ConvNeXt, then run JiT inference.
 
-DATA_ROOT=${DATA_ROOT:-/root/huilin/data/eccv_dn}
+DATA_ROOT=${DATA_ROOT:-D:/zhl/data/eccv_dn}
 INPUT_DIR=${INPUT_DIR:-${DATA_ROOT}/Drop}
-JIT_CKPT=${JIT_CKPT:-run/train/ablation_b16_3x3090/b16_scene_no_head/16}
+JIT_CKPT=${JIT_CKPT:-run/ablation_b16_3x3090/b16_focus_2scene_no_head}
 JIT_CKPT_TYPE=${JIT_CKPT_TYPE:-best}
-SCENE_CKPT=${SCENE_CKPT:-run/scene_convnext/checkpoint-best.pth}
+SCENE_CKPT=${SCENE_CKPT:-run/scene_convnext_focus_2scene_v1/checkpoint-best.pth}
 SCENE_JSON=${SCENE_JSON:-}
 OUTPUT_ROOT=${OUTPUT_ROOT:-submissions}
 
