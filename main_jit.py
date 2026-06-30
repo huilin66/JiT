@@ -11,6 +11,7 @@ import torch
 import torch.backends.cudnn as cudnn
 import torchvision.datasets as datasets
 import torchvision.transforms.v2 as transforms
+from PIL import Image
 from torch.utils.tensorboard import SummaryWriter
 
 import util.misc as misc
@@ -53,6 +54,19 @@ def set_seed(seed=42):
 
     # 6. 强制 PyTorch 使用确定性算法 (可选，可能会导致程序报错如果使用了不支持确定性的操作)
     # torch.use_deterministic_algorithms(True)
+
+
+class PairedRandomRot90:
+    _ROTATE_FUNCS = (
+        lambda img: img,
+        lambda img: img.transpose(Image.Transpose.ROTATE_90),
+        lambda img: img.transpose(Image.Transpose.ROTATE_180),
+        lambda img: img.transpose(Image.Transpose.ROTATE_270),
+    )
+
+    def __call__(self, *images):
+        rotate = random.choice(self._ROTATE_FUNCS)
+        return tuple(rotate(img) for img in images)
 
 
 def load_checkpoint(path):
@@ -169,6 +183,12 @@ def get_args_parser():
     parser.add_argument("--label_drop_prob", default=0.1, type=float)
     parser.add_argument("--loss_edge_weight", default=0.0, type=float)
     parser.add_argument("--loss_freq_weight", default=0.0, type=float)
+    parser.add_argument(
+        "--more_aug",
+        type=int,
+        default=0,
+        help="Enable MSDT-style extra paired augmentations: vertical flip and random 0/90/180/270 rotations.",
+    )
 
     parser.add_argument("--seed", default=0, type=int)
     parser.add_argument(
@@ -302,13 +322,17 @@ def main(args):
     else:
         log_writer = None
 
-    transform_train = transforms.Compose(
-        [
-            transforms.RandomCrop(args.img_size),
-            transforms.RandomHorizontalFlip(),
-            transforms.PILToTensor(),
-        ]
-    )
+    extra_train_transforms = [
+        transforms.RandomVerticalFlip(),
+        PairedRandomRot90(),
+    ] if args.more_aug else []
+    train_transforms = [
+        transforms.RandomCrop(args.img_size),
+        transforms.RandomHorizontalFlip(),
+        *extra_train_transforms,
+        transforms.PILToTensor(),
+    ]
+    transform_train = transforms.Compose(train_transforms)
 
     if not args.use_scene_dataset:
         print("[DATASET] use PairedRainDataset")
