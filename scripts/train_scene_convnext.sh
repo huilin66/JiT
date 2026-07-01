@@ -10,8 +10,8 @@ set -euo pipefail
 DATA_ROOT=${DATA_ROOT:-D:/zhl/data/eccv_dn}
 DATA_PATH=${DATA_PATH:-${DATA_ROOT}/RainDrop_Train}
 IMAGE_DIR=${IMAGE_DIR:-${DATA_PATH}/Drop}
-LABELS_JSON=${LABELS_JSON:-${DATA_PATH}/Drop_dn_2scene.json}
-OUTPUT_DIR=${OUTPUT_DIR:-run/scene_convnext_dn_2scene}
+LABELS_JSON=${LABELS_JSON:-${DATA_PATH}/Drop_blur_2scene.json}
+OUTPUT_DIR=${OUTPUT_DIR:-run/scene_convnext_blur_2scene}
 
 MODEL=${MODEL:-convnext_tiny}
 NUM_CLASSES=${NUM_CLASSES:-0}

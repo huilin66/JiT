@@ -11,7 +11,7 @@ HISTORY_CSV=${HISTORY_CSV:-${OUTPUT_ROOT}/submission_history.csv}
 SWEEP_DIR=${SWEEP_DIR:-submissions/local_val_sweep}
 
 CONFIG_CSV=${CONFIG_CSV:-${SWEEP_DIR}/local_val_sweep.csv}
-CONFIG_ROW=${CONFIG_ROW:-2}
+CONFIG_ROW=${CONFIG_ROW:-8}
 CONFIG_MODEL_NAME=${CONFIG_MODEL_NAME:-}
 
 
@@ -35,7 +35,7 @@ fi
 TILE_BATCH_SIZE=${TILE_BATCH_SIZE:-8}
 DEVICE=${DEVICE:-cuda:0}
 AMP_DTYPE=${AMP_DTYPE:-auto}
-TTA_HFLIP=${TTA_HFLIP:-0}
+TTA_HFLIP=${TTA_HFLIP:-1}
 TTA_VFLIP=${TTA_VFLIP:-0}
 NOTES=${NOTES:-submit_from_local_config}
 REMOVE_IMAGES_AFTER_ZIP=${REMOVE_IMAGES_AFTER_ZIP:-0}
@@ -103,6 +103,8 @@ remove_args=()
 if [[ "${REMOVE_IMAGES_AFTER_ZIP}" == "1" ]]; then
   remove_args+=(--remove-images-after-zip)
 fi
+
+STEPS=10
 
 echo "============================================================"
 echo "[Submit JiT] ${MODEL_NAME}"
