@@ -114,7 +114,7 @@ run_exp() {
     "${online_eval_args[@]}"
 }
 
-# run_exp "2scene" "${SCENE_FOCUS_2_PATH:-${DATA_PATH}/Drop_focus_2scene.json}" "$((MASTER_PORT_BASE + 0))" 0.0 0.0
+run_exp "2scene" "${SCENE_FOCUS_2_PATH:-${DATA_PATH}/Drop_focus_2scene.json}" "$((MASTER_PORT_BASE + 0))" 0.0 0.0
 run_exp "2scene_edge_freq" "${SCENE_FOCUS_2_PATH:-${DATA_PATH}/Drop_focus_2scene.json}" "$((MASTER_PORT_BASE + 1))" "${LOSS_EDGE_WEIGHT}" "${LOSS_FREQ_WEIGHT}"
 
 echo "focus_2scene augmented 3x3090 training finished."
