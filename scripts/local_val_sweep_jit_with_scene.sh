@@ -11,7 +11,7 @@ VAL_ROOT=${VAL_ROOT:-${DATA_ROOT}/jit_local_val_200}
 VAL_NUM_IMAGES=${VAL_NUM_IMAGES:-200}
 VAL_SEED=${VAL_SEED:-2026}
 
-JIT_CKPT=${JIT_CKPT:-run/ablation_b16_3x3090/b16_focus_2scene_no_head}
+JIT_CKPT=${JIT_CKPT:-run/train/b16_focus_2scene_msdt_refiner_1x5090/16}
 SCENE_CKPT=${SCENE_CKPT:-run/scene_convnext_focus_2scene_v1/checkpoint-best.pth}
 SOURCE_SCENE_JSON=${SOURCE_SCENE_JSON:-}
 SCENE_JSON=${SCENE_JSON:-}
@@ -21,13 +21,16 @@ LOCAL_CSV=${LOCAL_CSV:-${OUTPUT_ROOT}/local_val_sweep_200.csv}
 SUBMIT_HISTORY_CSV=${SUBMIT_HISTORY_CSV:-${OUTPUT_ROOT}/submission_history_200.csv}
 
 MODEL_NAME_PREFIX=${MODEL_NAME_PREFIX:-jit_local}
-JIT_CKPT_TYPES=${JIT_CKPT_TYPES:-best,last}
-STATE_KEYS=${STATE_KEYS:-model_ema1,model_ema2,model}
-STEPS_LIST=${STEPS_LIST:-1,2,4}
-STRIDES=${STRIDES:-128,64}
+JIT_CKPT_TYPES=${JIT_CKPT_TYPES:-best}
+STATE_KEYS=${STATE_KEYS:-model}
+STEPS_LIST=${STEPS_LIST:-1}
+STRIDES=${STRIDES:-64}
+SCALES_LIST=${SCALES_LIST:-"1.0 1.0,0.875 1.0,1.125 1.0,0.875,1.125"}
 TILE_BATCH_SIZE=${TILE_BATCH_SIZE:-8}
 DEVICE=${DEVICE:-cuda:0}
 AMP_DTYPE=${AMP_DTYPE:-auto}
+TTA_HFLIP=${TTA_HFLIP:-1}
+TTA_VFLIP=${TTA_VFLIP:-0}
 SCENE_BATCH_SIZE=${SCENE_BATCH_SIZE:-8}
 SCENE_NUM_WORKERS=${SCENE_NUM_WORKERS:-8}
 NOTES=${NOTES:-local_val_sweep}
@@ -93,59 +96,86 @@ split_list "${STEPS_LIST}"
 steps_list=("${SPLIT_RESULT[@]}")
 split_list "${STRIDES}"
 stride_list=("${SPLIT_RESULT[@]}")
+# shellcheck disable=SC2206
+scale_list=(${SCALES_LIST})
+
+scale_name() {
+  local raw="$1"
+  raw="${raw//,/__}"
+  raw="${raw//./p}"
+  echo "${raw}"
+}
+
+tta_args=()
+tta_suffix=""
+if [[ "${TTA_HFLIP}" == "1" ]]; then
+  tta_args+=(--tta-hflip)
+  tta_suffix="${tta_suffix}_hflip"
+fi
+if [[ "${TTA_VFLIP}" == "1" ]]; then
+  tta_args+=(--tta-vflip)
+  tta_suffix="${tta_suffix}_vflip"
+fi
 
 for ckpt_type in "${ckpt_type_list[@]}"; do
   for state_key in "${state_key_list[@]}"; do
     for steps in "${steps_list[@]}"; do
       for stride in "${stride_list[@]}"; do
-        run_model_name="${MODEL_NAME_PREFIX}_${ckpt_type}_${state_key}_s${steps}_r${stride}"
-        run_notes="${NOTES}; ckpt_type=${ckpt_type}; state_key=${state_key}; steps=${steps}; stride=${stride}"
+        for scales in "${scale_list[@]}"; do
+          scales_tag=$(scale_name "${scales}")
+          run_model_name="${MODEL_NAME_PREFIX}_${ckpt_type}_${state_key}_s${steps}_r${stride}${tta_suffix}_ms${scales_tag}"
+          run_notes="${NOTES}; ckpt_type=${ckpt_type}; state_key=${state_key}; steps=${steps}; stride=${stride}; tta_hflip=${TTA_HFLIP}; tta_vflip=${TTA_VFLIP}; scales=${scales}"
 
-        echo "============================================================"
-        echo "[Local JiT] ${run_model_name}"
-        echo "Checkpoint: ${JIT_CKPT}"
-        echo "Scene JSON: ${SCENE_JSON}"
-        echo "============================================================"
+          echo "============================================================"
+          echo "[Local JiT] ${run_model_name}"
+          echo "Checkpoint: ${JIT_CKPT}"
+          echo "Scene JSON: ${SCENE_JSON}"
+          echo "TTA hflip/vflip: ${TTA_HFLIP}/${TTA_VFLIP}"
+          echo "Scales: ${scales}"
+          echo "============================================================"
 
-        before_count=$(find "${OUTPUT_ROOT}" -maxdepth 1 -type d -name "${run_model_name}_${ckpt_type}_*" 2>/dev/null | wc -l || true)
-        python submit_jit.py \
-          --input-dir "${INPUT_DIR}" \
-          --checkpoint "${JIT_CKPT}" \
-          --ckpt_type "${ckpt_type}" \
-          --output-root "${OUTPUT_ROOT}" \
-          --history-csv "${SUBMIT_HISTORY_CSV}" \
-          --model-name "${run_model_name}" \
-          --state-key "${state_key}" \
-          --use-scene \
-          --scene-json "${SCENE_JSON}" \
-          --steps "${steps}" \
-          --stride "${stride}" \
-          --tile-batch-size "${TILE_BATCH_SIZE}" \
-          --device "${DEVICE}" \
-          --amp-dtype "${AMP_DTYPE}" \
-          --notes "${run_notes}"
+          before_count=$(find "${OUTPUT_ROOT}" -maxdepth 1 -type d -name "${run_model_name}_${ckpt_type}_*" 2>/dev/null | wc -l || true)
+          python submit_jit.py \
+            --input-dir "${INPUT_DIR}" \
+            --checkpoint "${JIT_CKPT}" \
+            --ckpt_type "${ckpt_type}" \
+            --output-root "${OUTPUT_ROOT}" \
+            --history-csv "${SUBMIT_HISTORY_CSV}" \
+            --model-name "${run_model_name}" \
+            --state-key "${state_key}" \
+            --use-scene \
+            --scene-json "${SCENE_JSON}" \
+            --steps "${steps}" \
+            --stride "${stride}" \
+            --tile-batch-size "${TILE_BATCH_SIZE}" \
+            "${tta_args[@]}" \
+            --scales "${scales}" \
+            --device "${DEVICE}" \
+            --amp-dtype "${AMP_DTYPE}" \
+            --notes "${run_notes}"
 
-        latest_dir=$(find "${OUTPUT_ROOT}" -maxdepth 1 -type d -name "${run_model_name}_${ckpt_type}_*" 2>/dev/null | sort | tail -n 1 || true)
-        after_count=$(find "${OUTPUT_ROOT}" -maxdepth 1 -type d -name "${run_model_name}_${ckpt_type}_*" 2>/dev/null | wc -l || true)
-        if [[ -z "${latest_dir}" || "${after_count}" == "${before_count}" ]]; then
-          echo "Could not locate output dir for ${run_model_name}" >&2
-          exit 2
-        fi
+          latest_dir=$(find "${OUTPUT_ROOT}" -maxdepth 1 -type d -name "${run_model_name}_${ckpt_type}_*" 2>/dev/null | sort | tail -n 1 || true)
+          after_count=$(find "${OUTPUT_ROOT}" -maxdepth 1 -type d -name "${run_model_name}_${ckpt_type}_*" 2>/dev/null | wc -l || true)
+          if [[ -z "${latest_dir}" || "${after_count}" == "${before_count}" ]]; then
+            echo "Could not locate output dir for ${run_model_name}" >&2
+            exit 2
+          fi
 
-        python tools/evaluate_submission_dir.py \
-          --prediction-dir "${latest_dir}" \
-          --clear-dir "${CLEAR_DIR}" \
-          --csv "${LOCAL_CSV}" \
-          --model-name "${run_model_name}" \
-          --checkpoint "${JIT_CKPT}" \
-          --ckpt-type "${ckpt_type}" \
-          --state-key "${state_key}" \
-          --steps "${steps}" \
-          --stride "${stride}" \
-          --tile-batch-size "${TILE_BATCH_SIZE}" \
-          --scene-json "${SCENE_JSON}" \
-          --device "${DEVICE}" \
-          --notes "${run_notes}"
+          python tools/evaluate_submission_dir.py \
+            --prediction-dir "${latest_dir}" \
+            --clear-dir "${CLEAR_DIR}" \
+            --csv "${LOCAL_CSV}" \
+            --model-name "${run_model_name}" \
+            --checkpoint "${JIT_CKPT}" \
+            --ckpt-type "${ckpt_type}" \
+            --state-key "${state_key}" \
+            --steps "${steps}" \
+            --stride "${stride}" \
+            --tile-batch-size "${TILE_BATCH_SIZE}" \
+            --scene-json "${SCENE_JSON}" \
+            --device "${DEVICE}" \
+            --notes "${run_notes}"
+        done
       done
     done
   done
