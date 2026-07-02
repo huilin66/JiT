@@ -38,6 +38,7 @@ DEVICE=${DEVICE:-cuda:0}
 AMP_DTYPE=${AMP_DTYPE:-auto}
 TTA_HFLIP=${TTA_HFLIP:-1}
 TTA_VFLIP=${TTA_VFLIP:-0}
+SCALES=${SCALES:-1.0}
 NOTES=${NOTES:-submit_from_local_config}
 REMOVE_IMAGES_AFTER_ZIP=${REMOVE_IMAGES_AFTER_ZIP:-0}
 
@@ -83,6 +84,14 @@ fi
 if [[ -n "${tta_suffix}" && "${EXPLICIT_MODEL_NAME}" == "0" ]]; then
   MODEL_NAME="${MODEL_NAME}${tta_suffix}"
 fi
+scale_suffix=""
+if [[ "${SCALES}" != "1.0" && "${SCALES}" != "1" ]]; then
+  scale_suffix="_ms${SCALES//,/__}"
+  scale_suffix="${scale_suffix//./p}"
+fi
+if [[ -n "${scale_suffix}" && "${EXPLICIT_MODEL_NAME}" == "0" ]]; then
+  MODEL_NAME="${MODEL_NAME}${scale_suffix}"
+fi
 
 scene_args=()
 if [[ -n "${SCENE_JSON}" ]]; then
@@ -115,6 +124,7 @@ echo "steps=${STEPS}"
 echo "stride=${STRIDE}"
 echo "tta_hflip=${TTA_HFLIP}"
 echo "tta_vflip=${TTA_VFLIP}"
+echo "scales=${SCALES}"
 echo "scene_json=${SCENE_JSON:-<predict with SCENE_CKPT>}"
 echo "output_root=${OUTPUT_ROOT}"
 echo "============================================================"
@@ -133,9 +143,10 @@ python submit_jit.py \
   --stride "${STRIDE}" \
   --tile-batch-size "${TILE_BATCH_SIZE}" \
   "${tta_args[@]}" \
+  --scales "${SCALES}" \
   --device "${DEVICE}" \
   --amp-dtype "${AMP_DTYPE}" \
-  --notes "${NOTES}; ckpt_type=${JIT_CKPT_TYPE}; state_key=${STATE_KEY}; steps=${STEPS}; stride=${STRIDE}; tta_hflip=${TTA_HFLIP}; tta_vflip=${TTA_VFLIP}" \
+  --notes "${NOTES}; ckpt_type=${JIT_CKPT_TYPE}; state_key=${STATE_KEY}; steps=${STEPS}; stride=${STRIDE}; tta_hflip=${TTA_HFLIP}; tta_vflip=${TTA_VFLIP}; scales=${SCALES}" \
   "${remove_args[@]}"
 
 echo "Submission prediction finished: ${OUTPUT_ROOT}"

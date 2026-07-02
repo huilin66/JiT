@@ -70,6 +70,7 @@ def parse_args():
     parser.add_argument("--tile-batch-size", type=int, default=32)
     parser.add_argument("--tta-hflip", action="store_true", help="Average original and horizontal-flip inference.")
     parser.add_argument("--tta-vflip", action="store_true", help="Average original and vertical-flip inference.")
+    parser.add_argument("--scales", default="1.0", help="Comma-separated multi-scale inference list, e.g. 1.0,0.875,1.125.")
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--amp-dtype", default="auto", choices=["auto", "bf16", "fp16", "fp32"])
     parser.add_argument("--submission-info", default="readme.txt", help="Optional file added to ZIP; empty disables it")
@@ -174,6 +175,19 @@ def list_input_images(input_dir):
     return files
 
 
+def parse_scales(raw):
+    scales = []
+    for item in str(raw).replace(";", ",").split(","):
+        item = item.strip()
+        if not item:
+            continue
+        scale = float(item)
+        if scale <= 0:
+            raise ValueError(f"Scale must be positive: {scale}")
+        scales.append(scale)
+    return scales or [1.0]
+
+
 def load_scene_labels(path, image_files, class_num):
     if not path:
         raise ValueError("--scene-json is required when --use-scene is enabled")
@@ -268,11 +282,14 @@ def restore_image(
     amp_dtype,
     tta_hflip=False,
     tta_vflip=False,
+    scales=None,
 ):
     image = Image.open(image_path).convert("RGB")
     array = np.array(image, dtype=np.float32, copy=True)
     tensor = torch.from_numpy(array).permute(2, 0, 1).unsqueeze(0).div_(255.0)
     tensor = tensor.mul_(2.0).sub_(1.0)
+    original_h, original_w = tensor.shape[-2:]
+    scales = scales or [1.0]
 
     variants = [(tensor, ())]
     if tta_hflip:
@@ -283,21 +300,39 @@ def restore_image(
         variants.append((tensor.flip((-2, -1)), (-2, -1)))
 
     outputs = []
-    for variant, inverse_dims in variants:
-        prediction = restore_tensor(
-            model=model,
-            tensor=variant,
-            device=device,
-            patch_size=patch_size,
-            stride=stride,
-            tile_batch_size=tile_batch_size,
-            steps=steps,
-            scene_id=scene_id,
-            amp_dtype=amp_dtype,
-        )
-        if inverse_dims:
-            prediction = prediction.flip(inverse_dims)
-        outputs.append(prediction)
+    for scale in scales:
+        scaled_h = max(1, int(round(original_h * scale)))
+        scaled_w = max(1, int(round(original_w * scale)))
+        for variant, inverse_dims in variants:
+            scaled = variant
+            if scaled_h != original_h or scaled_w != original_w:
+                scaled = F.interpolate(
+                    scaled,
+                    size=(scaled_h, scaled_w),
+                    mode="bicubic",
+                    align_corners=False,
+                ).clamp_(-1.0, 1.0)
+            prediction = restore_tensor(
+                model=model,
+                tensor=scaled,
+                device=device,
+                patch_size=patch_size,
+                stride=stride,
+                tile_batch_size=tile_batch_size,
+                steps=steps,
+                scene_id=scene_id,
+                amp_dtype=amp_dtype,
+            )
+            if inverse_dims:
+                prediction = prediction.flip(inverse_dims)
+            if prediction.shape[-2:] != (original_h, original_w):
+                prediction = F.interpolate(
+                    prediction,
+                    size=(original_h, original_w),
+                    mode="bicubic",
+                    align_corners=False,
+                ).clamp_(-1.0, 1.0)
+            outputs.append(prediction)
 
     output = torch.stack(outputs, dim=0).mean(dim=0).clamp_(-1.0, 1.0)
     output = output.add(1.0).mul_(127.5).round_().clamp_(0, 255).to(torch.uint8)
@@ -349,6 +384,7 @@ def main():
     has_detail_refiner = infer_has_detail_refiner(state_dict)
     if cli.stride <= 0 or cli.stride > img_size:
         raise ValueError(f"stride must be in [1, {img_size}]")
+    scales = parse_scales(cli.scales)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     model_name = sanitize_name(cli.model_name or default_model_name(checkpoint_path))
@@ -446,6 +482,7 @@ def main():
             amp_dtype=cli.amp_dtype,
             tta_hflip=cli.tta_hflip,
             tta_vflip=cli.tta_vflip,
+            scales=scales,
         )
         prediction.save(image_dir / f"{image_path.stem}.png", format="PNG", optimize=True)
     runtime = time.perf_counter() - started
@@ -476,6 +513,7 @@ def main():
             "notes": (
                 f"detail_refiner={int(has_detail_refiner)}"
                 f"; tta_hflip={int(cli.tta_hflip)}; tta_vflip={int(cli.tta_vflip)}"
+                f"; scales={','.join(str(scale) for scale in scales)}"
                 + (f"; {cli.notes}" if cli.notes else "")
             ),
         },
