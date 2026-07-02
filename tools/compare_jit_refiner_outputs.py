@@ -96,6 +96,8 @@ def mean(rows: list[dict], key: str) -> float | None:
 def rounded(value):
     if value is None or value == "":
         return ""
+    if isinstance(value, str):
+        return value
     return round(float(value), 6)
 
 
