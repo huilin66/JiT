@@ -10,16 +10,17 @@ OUTPUT_ROOT=${OUTPUT_ROOT:-submissions}
 HISTORY_CSV=${HISTORY_CSV:-${OUTPUT_ROOT}/submission_history.csv}
 SWEEP_DIR=${SWEEP_DIR:-submissions/local_val_sweep}
 
-CONFIG_CSV=${CONFIG_CSV:-${SWEEP_DIR}/local_val_sweep.csv}
-CONFIG_ROW=${CONFIG_ROW:-8}
+# CONFIG_CSV=${CONFIG_CSV:-${SWEEP_DIR}/local_val_sweep.csv}
+CONFIG_CSV=${CONFIG_CSV:-}
+CONFIG_ROW=${CONFIG_ROW:-}
 CONFIG_MODEL_NAME=${CONFIG_MODEL_NAME:-}
 
 
-JIT_CKPT=${JIT_CKPT:-run/ablation_b16_3x3090/b16_focus_2scene_no_head}
+JIT_CKPT=${JIT_CKPT:-run/train/b16_focus_2scene_msdt_refiner_1x5090/16}
 JIT_CKPT_TYPE=${JIT_CKPT_TYPE:-best}
-STATE_KEY=${STATE_KEY:-auto}
+STATE_KEY=${STATE_KEY:-model}
 STEPS=${STEPS:-1}
-STRIDE=${STRIDE:-128}
+STRIDE=${STRIDE:-64}
 
 SCENE_CKPT=${SCENE_CKPT:-run/scene_convnext_focus_2scene_v1/checkpoint-best.pth}
 SCENE_JSON=${SCENE_JSON:-}
@@ -103,8 +104,6 @@ remove_args=()
 if [[ "${REMOVE_IMAGES_AFTER_ZIP}" == "1" ]]; then
   remove_args+=(--remove-images-after-zip)
 fi
-
-STEPS=10
 
 echo "============================================================"
 echo "[Submit JiT] ${MODEL_NAME}"
