@@ -38,6 +38,9 @@ DEVICE=${DEVICE:-cuda:0}
 AMP_DTYPE=${AMP_DTYPE:-auto}
 TTA_HFLIP=${TTA_HFLIP:-1}
 TTA_VFLIP=${TTA_VFLIP:-0}
+TTA_ROT90=${TTA_ROT90:-0}
+TTA_ROT180=${TTA_ROT180:-0}
+TTA_ROT270=${TTA_ROT270:-0}
 SCALES=${SCALES:-1.0}
 NOTES=${NOTES:-submit_from_local_config}
 REMOVE_IMAGES_AFTER_ZIP=${REMOVE_IMAGES_AFTER_ZIP:-0}
@@ -80,6 +83,18 @@ fi
 if [[ "${TTA_VFLIP}" == "1" ]]; then
   tta_args+=(--tta-vflip)
   tta_suffix="${tta_suffix}_vflip"
+fi
+if [[ "${TTA_ROT90}" == "1" ]]; then
+  tta_args+=(--tta-rot90)
+  tta_suffix="${tta_suffix}_rot90"
+fi
+if [[ "${TTA_ROT180}" == "1" ]]; then
+  tta_args+=(--tta-rot180)
+  tta_suffix="${tta_suffix}_rot180"
+fi
+if [[ "${TTA_ROT270}" == "1" ]]; then
+  tta_args+=(--tta-rot270)
+  tta_suffix="${tta_suffix}_rot270"
 fi
 if [[ -n "${tta_suffix}" && "${EXPLICIT_MODEL_NAME}" == "0" ]]; then
   MODEL_NAME="${MODEL_NAME}${tta_suffix}"
@@ -124,6 +139,9 @@ echo "steps=${STEPS}"
 echo "stride=${STRIDE}"
 echo "tta_hflip=${TTA_HFLIP}"
 echo "tta_vflip=${TTA_VFLIP}"
+echo "tta_rot90=${TTA_ROT90}"
+echo "tta_rot180=${TTA_ROT180}"
+echo "tta_rot270=${TTA_ROT270}"
 echo "scales=${SCALES}"
 echo "scene_json=${SCENE_JSON:-<predict with SCENE_CKPT>}"
 echo "output_root=${OUTPUT_ROOT}"
@@ -146,7 +164,7 @@ python submit_jit.py \
   --scales "${SCALES}" \
   --device "${DEVICE}" \
   --amp-dtype "${AMP_DTYPE}" \
-  --notes "${NOTES}; ckpt_type=${JIT_CKPT_TYPE}; state_key=${STATE_KEY}; steps=${STEPS}; stride=${STRIDE}; tta_hflip=${TTA_HFLIP}; tta_vflip=${TTA_VFLIP}; scales=${SCALES}" \
+  --notes "${NOTES}; ckpt_type=${JIT_CKPT_TYPE}; state_key=${STATE_KEY}; steps=${STEPS}; stride=${STRIDE}; tta_hflip=${TTA_HFLIP}; tta_vflip=${TTA_VFLIP}; tta_rot90=${TTA_ROT90}; tta_rot180=${TTA_ROT180}; tta_rot270=${TTA_ROT270}; scales=${SCALES}" \
   "${remove_args[@]}"
 
 echo "Submission prediction finished: ${OUTPUT_ROOT}"

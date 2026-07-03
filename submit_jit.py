@@ -70,6 +70,9 @@ def parse_args():
     parser.add_argument("--tile-batch-size", type=int, default=32)
     parser.add_argument("--tta-hflip", action="store_true", help="Average original and horizontal-flip inference.")
     parser.add_argument("--tta-vflip", action="store_true", help="Average original and vertical-flip inference.")
+    parser.add_argument("--tta-rot90", action="store_true", help="Average original and 90-degree rotation inference.")
+    parser.add_argument("--tta-rot180", action="store_true", help="Average original and 180-degree rotation inference.")
+    parser.add_argument("--tta-rot270", action="store_true", help="Average original and 270-degree rotation inference.")
     parser.add_argument("--scales", default="1.0", help="Comma-separated multi-scale inference list, e.g. 1.0,0.875,1.125.")
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--amp-dtype", default="auto", choices=["auto", "bf16", "fp16", "fp32"])
@@ -282,6 +285,9 @@ def restore_image(
     amp_dtype,
     tta_hflip=False,
     tta_vflip=False,
+    tta_rot90=False,
+    tta_rot180=False,
+    tta_rot270=False,
     scales=None,
 ):
     image = Image.open(image_path).convert("RGB")
@@ -298,6 +304,12 @@ def restore_image(
         variants.append((tensor.flip(-2), (-2,)))
     if tta_hflip and tta_vflip:
         variants.append((tensor.flip((-2, -1)), (-2, -1)))
+    if tta_rot90:
+        variants.append((torch.rot90(tensor, k=1, dims=(-2, -1)), -1))
+    if tta_rot180:
+        variants.append((torch.rot90(tensor, k=2, dims=(-2, -1)), -2))
+    if tta_rot270:
+        variants.append((torch.rot90(tensor, k=3, dims=(-2, -1)), -3))
 
     outputs = []
     for scale in scales:
@@ -324,7 +336,10 @@ def restore_image(
                 amp_dtype=amp_dtype,
             )
             if inverse_dims:
-                prediction = prediction.flip(inverse_dims)
+                if isinstance(inverse_dims, tuple):
+                    prediction = prediction.flip(inverse_dims)
+                else:
+                    prediction = torch.rot90(prediction, k=inverse_dims, dims=(-2, -1))
             if prediction.shape[-2:] != (original_h, original_w):
                 prediction = F.interpolate(
                     prediction,
@@ -482,6 +497,9 @@ def main():
             amp_dtype=cli.amp_dtype,
             tta_hflip=cli.tta_hflip,
             tta_vflip=cli.tta_vflip,
+            tta_rot90=cli.tta_rot90,
+            tta_rot180=cli.tta_rot180,
+            tta_rot270=cli.tta_rot270,
             scales=scales,
         )
         prediction.save(image_dir / f"{image_path.stem}.png", format="PNG", optimize=True)
@@ -513,6 +531,7 @@ def main():
             "notes": (
                 f"detail_refiner={int(has_detail_refiner)}"
                 f"; tta_hflip={int(cli.tta_hflip)}; tta_vflip={int(cli.tta_vflip)}"
+                f"; tta_rot90={int(cli.tta_rot90)}; tta_rot180={int(cli.tta_rot180)}; tta_rot270={int(cli.tta_rot270)}"
                 f"; scales={','.join(str(scale) for scale in scales)}"
                 + (f"; {cli.notes}" if cli.notes else "")
             ),
