@@ -181,6 +181,7 @@ def get_args_parser():
     parser.add_argument("--noise_scale", default=1.0, type=float)
     parser.add_argument("--t_eps", default=5e-2, type=float)
     parser.add_argument("--label_drop_prob", default=0.1, type=float)
+    parser.add_argument("--loss_lpips_weight", default=0.5, type=float)
     parser.add_argument("--loss_edge_weight", default=0.0, type=float)
     parser.add_argument("--loss_freq_weight", default=0.0, type=float)
     parser.add_argument(
@@ -432,7 +433,7 @@ def main(args):
         device=device,
         target_w_rec=1.0,
         target_w_ssim=1.0,  # 对应指标公式的 10
-        target_w_lpips=0.5,  # 对应指标公式的 5
+        target_w_lpips=args.loss_lpips_weight,  # 对应指标公式的 5
         target_w_edge=args.loss_edge_weight,
         target_w_freq=args.loss_freq_weight,
         total_epochs=args.epochs,
