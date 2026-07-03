@@ -16,9 +16,9 @@ CONFIG_ROW=${CONFIG_ROW:-}
 CONFIG_MODEL_NAME=${CONFIG_MODEL_NAME:-}
 
 
-JIT_CKPT=${JIT_CKPT:-run/train/b16_focus_2scene_msdt_refiner_1x5090/16}
-JIT_CKPT_TYPE=${JIT_CKPT_TYPE:-best}
-STATE_KEY=${STATE_KEY:-model}
+JIT_CKPT=${JIT_CKPT:-run/train/b16_focus_2scene_msdt_refiner_plan_b_conservative_1x5090/16}
+JIT_CKPT_TYPE=${JIT_CKPT_TYPE:-last}
+STATE_KEY=${STATE_KEY:-model_ema2}
 STEPS=${STEPS:-1}
 STRIDE=${STRIDE:-64}
 
