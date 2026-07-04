@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Smoke test JiT-L/16 and JiT-H/16 focus-2scene no-head runs on 2 x RTX 6000 48GB.
+# Smoke test JiT-H/16 focus-2scene no-head run on 1 x A100.
 # Each run uses 2 epochs with 1 train step per epoch.
 # Epoch 1 activates LPIPS and tests its backward path.
 
@@ -9,8 +9,8 @@ export TORCHDYNAMO_DISABLE=1
 export USE_LIBUV=0
 export PYTORCH_ALLOC_CONF=${PYTORCH_ALLOC_CONF:-max_split_size_mb:128}
 
-GPUS=${GPUS:-0,1}
-NPROC=${NPROC:-2}
+GPUS=${GPUS:-0}
+NPROC=${NPROC:-1}
 MASTER_PORT_BASE=${MASTER_PORT_BASE:-30520}
 
 DATA_PATH=${DATA_PATH:-/data/huilin/scrinvme/huilin/tp/eccv_dn/RainDrop_Train}
@@ -32,6 +32,11 @@ EVAL_NUM_IMAGES=${EVAL_NUM_IMAGES:-1}
 NUM_SAMPLING_STEPS=${NUM_SAMPLING_STEPS:-1}
 
 CUDA_VISIBLE_DEVICES="${GPUS}" python -c "import torch; assert torch.cuda.is_available(), 'CUDA is unavailable'; print('GPUs:', torch.cuda.device_count(), [torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())], 'torch:', torch.__version__, 'CUDA:', torch.version.cuda)"
+VISIBLE_GPU_COUNT=$(CUDA_VISIBLE_DEVICES="${GPUS}" python -c "import torch; print(torch.cuda.device_count())")
+if (( NPROC > VISIBLE_GPU_COUNT )); then
+  echo "NPROC=${NPROC} is larger than visible GPU count ${VISIBLE_GPU_COUNT} from GPUS=${GPUS}" >&2
+  exit 2
+fi
 
 run_exp() {
   local exp_name="$1"
@@ -43,7 +48,7 @@ run_exp() {
   local output_dir="${OUT_ROOT}/${exp_name}/16"
 
   echo "============================================================"
-  echo "[Smoke RTX6000 focus 2scene] ${exp_name}"
+  echo "[Smoke A100 focus 2scene] ${exp_name}"
   echo "model=${model}"
   echo "ckpt=${ckpt}"
   echo "GPUS=${GPUS}, nproc=${NPROC}, batch=${batch_size}, lr=${lr}"
