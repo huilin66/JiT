@@ -22,8 +22,8 @@ DATA_PATH=${DATA_PATH:-/scrinvme/huilin/tp/eccv_dn/RainDrop_Train}
 VAL_DATA_PATH=${VAL_DATA_PATH:-${DATA_PATH}}
 SCENE_FOCUS_2_PATH=${SCENE_FOCUS_2_PATH:-${DATA_PATH}/Drop_focus_2scene.json}
 
-CKPT_L=${CKPT_L:-/scrinvme/huilin/tp/eccv_dn/jit-l-16}
-CKPT_H=${CKPT_H:-/scrinvme/huilin/tp/eccv_dn/jit-h-16}
+CKPT_L=${CKPT_L:-ckpt/jit-l-16}
+CKPT_H=${CKPT_H:-ckpt/jit-h-16}
 OUT_ROOT=${OUT_ROOT:-run/train/focus_2scene_lh_no_head_2xrtx6000_48g}
 
 IMG_SIZE=${IMG_SIZE:-256}
