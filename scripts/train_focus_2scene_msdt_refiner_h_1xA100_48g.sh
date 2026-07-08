@@ -30,7 +30,7 @@ CKPT_H=${CKPT_H:-run/train/focus_2scene_h_no_head_1xA100_48g/jit_h16_focus_2scen
 OUT_ROOT=${OUT_ROOT:-run/train/focus_2scene_msdt_refiner_h_1xA100_48g}
 
 IMG_SIZE=${IMG_SIZE:-256}
-BATCH_SIZE_H=${BATCH_SIZE_H:-4}
+BATCH_SIZE_H=${BATCH_SIZE_H:-32}
 EPOCHS=${EPOCHS:-300}
 WARMUP_EPOCHS=${WARMUP_EPOCHS:-5}
 EVAL_EPOCH=${EVAL_EPOCH:-5}
