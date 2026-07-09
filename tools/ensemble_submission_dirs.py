@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from tqdm import tqdm
 import argparse
 import csv
 import time
@@ -112,7 +113,7 @@ def main():
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     started = time.perf_counter()
-    for name in names:
+    for name in tqdm(names):
         accum = None
         for weight, directory in zip(weights, input_dirs):
             image = Image.open(directory / name).convert("RGB")

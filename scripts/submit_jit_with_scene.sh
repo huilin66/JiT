@@ -5,7 +5,7 @@ set -euo pipefail
 
 DATA_ROOT=${DATA_ROOT:-D:/zhl/data/eccv_dn}
 INPUT_DIR=${INPUT_DIR:-${DATA_ROOT}/Drop}
-JIT_CKPT=${JIT_CKPT:-run/ablation_b16_3x3090/b16_focus_2scene_aug_no_head}
+JIT_CKPT=${JIT_CKPT:-run/ablation_b16_3x3090/b16_focus_2scene_lr_low_lpips_base_no_head}
 JIT_CKPT_TYPE=${JIT_CKPT_TYPE:-best}
 SCENE_CKPT=${SCENE_CKPT:-run/scene_convnext_focus_2scene_v1/checkpoint-best.pth}
 SCENE_JSON=${SCENE_JSON:-}
