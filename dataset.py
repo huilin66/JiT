@@ -1,5 +1,6 @@
 import json
 import os
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -347,3 +348,153 @@ class PairedRainDatasetInfer(Dataset):
 
         # 返回的是：(输入网络图, 目标真值图)
         return rain_img, img_name
+
+
+class PseudoRainTrainDataset(Dataset):
+    """Training dataset where "clean" targets are pseudo-labels from a teacher model.
+
+    Returns (rain, pseudo_gt, mask, is_pseudo, dummy_labels) where is_pseudo=1.
+    mask is a single-channel restoration mask matching the pseudo dimensions.
+    """
+
+    def __init__(self, rain_dir, pseudo_dir, mask_dir=None, transform=None, scene_path=None):
+        self.rain_dir = rain_dir
+        self.pseudo_dir = pseudo_dir
+        self.mask_dir = mask_dir
+        self.transform = transform
+        self.scene_path = scene_path
+        self.scene_info = self._load_scene_info(scene_path)
+        rain_files = sorted(os.listdir(rain_dir))
+        pseudo_names = {p.name for p in Path(pseudo_dir).glob("*.png")}
+        self.image_files = [f for f in rain_files if f in pseudo_names]
+        if mask_dir:
+            mask_names = {p.name for p in Path(mask_dir).glob("*_mask.png")}
+        else:
+            mask_names = set()
+        self.has_masks = len(mask_names) > 0
+        if not self.image_files:
+            raise RuntimeError(
+                f"No paired rain/pseudo images found. rain_dir={rain_dir}, pseudo_dir={pseudo_dir}"
+            )
+        print(f"[PseudoRainTrainDataset] {len(self.image_files)} paired samples "
+              f"(rain={len(rain_files)}, pseudo={len(pseudo_names)}, masks={len(mask_names)})")
+
+    def _load_scene_info(self, scene_path):
+        if not scene_path:
+            return None
+        scene_path = Path(scene_path)
+        if not scene_path.exists():
+            raise FileNotFoundError(f"Scene label file not found: {scene_path}")
+        if scene_path.suffix.lower() == ".json":
+            with open(scene_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        df = pd.read_csv(scene_path, header=0, index_col=False)
+        if {"type", "folder_name", "class_id"}.issubset(df.columns):
+            df["folder_name"] = df["folder_name"].astype(str).str.zfill(5)
+            df["union_key"] = df["type"].str.strip().str.upper() + "_" + df["folder_name"]
+            return dict(zip(df["union_key"], df["class_id"]))
+        raise ValueError(
+            "Unsupported scene label file. Expected JSON filename map or CSV with "
+            "type, folder_name, class_id columns."
+        )
+
+    def _scene_label(self, img_name):
+        if self.scene_info is None:
+            return 0
+        if img_name in self.scene_info:
+            return int(self.scene_info.get(img_name, 0))
+        parts = img_name.split("_")
+        if len(parts) >= 2:
+            time_prefix = "D" if parts[0].lower() == "day" else "N"
+            return int(self.scene_info.get(f"{time_prefix}_{parts[1]}", 0))
+        return 0
+
+    def __len__(self):
+        return len(self.image_files)
+
+    def __getitem__(self, idx):
+        img_name = self.image_files[idx]
+        rain_path = os.path.join(self.rain_dir, img_name)
+        pseudo_path = os.path.join(self.pseudo_dir, img_name)
+
+        rain_img = Image.open(rain_path).convert("RGB")
+        pseudo_img = Image.open(pseudo_path).convert("RGB")
+
+        if self.mask_dir:
+            stem = Path(img_name).stem
+            mask_path = os.path.join(self.mask_dir, f"{stem}_mask.png")
+            if os.path.exists(mask_path):
+                mask_img = Image.open(mask_path).convert("L")
+            else:
+                mask_img = Image.new("L", rain_img.size, 0)
+        else:
+            mask_img = Image.new("L", rain_img.size, 0)
+
+        if self.transform:
+            # Apply same spatial transform to rain, pseudo, and mask.
+            rain_img, pseudo_img, mask_img = self.transform(rain_img, pseudo_img, mask_img)
+
+        mask = torch.from_numpy(np.array(mask_img, dtype=np.float32) / 255.0)
+        # Ensure mask has channel dim: [1, H, W]
+        if mask.ndim == 2:
+            mask = mask.unsqueeze(0)
+
+        is_pseudo = torch.ones(1, dtype=torch.float32)
+        dummy_labels = torch.zeros(1, dtype=torch.long) + self._scene_label(img_name)
+        return rain_img, pseudo_img, mask, is_pseudo, dummy_labels
+
+
+class MixedRealPseudoDataset(Dataset):
+    """Wraps a real dataset and a pseudo dataset into one with uniform interface.
+
+    Returns (rain, target, is_pseudo, mask, dummy_labels) for all samples.
+    - is_pseudo=0 for real samples, is_pseudo=1 for pseudo samples.
+    - mask: per-pixel restoration mask for pseudo; zeros for real.
+    """
+
+    def __init__(self, real_dataset, pseudo_dataset, pseudo_ratio=0.3):
+        self.real_dataset = real_dataset
+        self.pseudo_dataset = pseudo_dataset
+        self.pseudo_ratio = float(pseudo_ratio)
+        self.real_len = len(real_dataset)
+        self.pseudo_len = len(pseudo_dataset)
+
+        if self.pseudo_ratio <= 0 or self.pseudo_len == 0:
+            self.pseudo_per_epoch = 0
+        else:
+            self.pseudo_per_epoch = int(
+                self.real_len * self.pseudo_ratio / (1.0 - self.pseudo_ratio)
+            )
+            self.pseudo_per_epoch = min(self.pseudo_per_epoch, self.pseudo_len)
+            self.pseudo_per_epoch = max(1, self.pseudo_per_epoch)
+
+        self.total_len = self.real_len + self.pseudo_per_epoch
+        print(
+            f"[MixedRealPseudoDataset] real={self.real_len}, pseudo={self.pseudo_len}, "
+            f"pseudo_ratio={self.pseudo_ratio:.2f}, pseudo_per_epoch={self.pseudo_per_epoch}, "
+            f"total={self.total_len}"
+        )
+
+    def __len__(self):
+        return self.total_len
+
+    def __getitem__(self, idx):
+        if idx < self.real_len:
+            rain, clean, labels = self.real_dataset[idx]
+            is_pseudo = torch.zeros(1, dtype=torch.float32)
+            # Dummy zero mask matching spatial size.
+            if isinstance(rain, torch.Tensor):
+                _, h, w = rain.shape
+            else:
+                w, h = rain.size
+            mask = torch.zeros(1, h, w, dtype=torch.float32)
+            return rain, clean, is_pseudo, mask, labels
+        else:
+            pseudo_offset = idx - self.real_len
+            if self.pseudo_per_epoch > 0:
+                pseudo_idx = int(pseudo_offset * self.pseudo_len / self.pseudo_per_epoch)
+            else:
+                pseudo_idx = pseudo_offset
+            pseudo_idx = pseudo_idx % max(1, self.pseudo_len)
+            rain, pseudo, mask, is_pseudo, labels = self.pseudo_dataset[pseudo_idx]
+            return rain, pseudo, is_pseudo, mask, labels

@@ -22,12 +22,20 @@ class Denoiser(nn.Module):
 
         self.use_detail_refiner = bool(getattr(args, "use_detail_refiner", 0))
         self.freeze_jit = bool(getattr(args, "freeze_jit", 0))
+        self.unfreeze_jit_last_blocks = int(getattr(args, "unfreeze_jit_last_blocks", 0))
         if self.freeze_jit and not self.use_detail_refiner:
             raise ValueError("--freeze_jit 1 requires --use_detail_refiner 1")
-        if self.use_detail_refiner and not self.freeze_jit:
+        if self.unfreeze_jit_last_blocks > 0 and not self.use_detail_refiner:
+            raise ValueError("--unfreeze_jit_last_blocks requires --use_detail_refiner 1")
+        if self.unfreeze_jit_last_blocks > 0 and self.freeze_jit:
             raise ValueError(
-                "MSDT detail-refiner training requires --freeze_jit 1 so JiT "
-                "remains a fixed clean-image predictor."
+                "--unfreeze_jit_last_blocks > 0 is incompatible with --freeze_jit 1. "
+                "Use --freeze_jit 0 and --unfreeze_jit_last_blocks N instead."
+            )
+        if self.use_detail_refiner and not self.freeze_jit and self.unfreeze_jit_last_blocks <= 0:
+            raise ValueError(
+                "Joint refiner training requires --unfreeze_jit_last_blocks N. "
+                "Full JiT fine-tuning is intentionally disabled by default."
             )
         if self.use_detail_refiner:
             self.detail_refiner = MSDTDetailRefiner(
@@ -43,6 +51,30 @@ class Denoiser(nn.Module):
         if self.freeze_jit:
             self.net.requires_grad_(False)
             self.net.eval()
+        elif self.unfreeze_jit_last_blocks > 0:
+            # Freeze all JiT blocks first, then selectively unfreeze the last N.
+            self.net.requires_grad_(True)
+            self.net.eval()  # BN/ dropout in eval mode for stability
+            total_blocks = len(self.net.blocks)
+            freeze_until = max(0, total_blocks - self.unfreeze_jit_last_blocks)
+            for i, block in enumerate(self.net.blocks):
+                if i < freeze_until:
+                    block.requires_grad_(False)
+            # Keep patch embed, pos embed, time/class embedders frozen.
+            self.net.x_embedder.requires_grad_(False)
+            self.net.t_embedder.requires_grad_(False)
+            self.net.y_embedder.requires_grad_(False)
+            # Also freeze final_layer for safety (it was zero-initialized).
+            self.net.final_layer.requires_grad_(False)
+            if hasattr(self.net, 'bg_subnet') and self.net.use_bg_subnet:
+                self.net.bg_subnet.requires_grad_(False)
+            frozen_count = sum(p.numel() for p in self.net.parameters() if not p.requires_grad)
+            trainable_count = sum(p.numel() for p in self.net.parameters() if p.requires_grad)
+            print(
+                f"[Denoiser] Partial JiT unfreeze: last {self.unfreeze_jit_last_blocks}/"
+                f"{total_blocks} blocks trainable ({trainable_count} trainable / "
+                f"{frozen_count} frozen params in JiT)"
+            )
 
         self.label_drop_prob = args.label_drop_prob
         self.P_mean = args.P_mean
@@ -68,6 +100,12 @@ class Denoiser(nn.Module):
             # The frozen JiT must produce a stable ODE endpoint while the
             # refiner is training, even when the enclosing Denoiser is in train mode.
             self.net.eval()
+        elif self.unfreeze_jit_last_blocks > 0:
+            # Partial unfreeze: JiT blocks that are trainable stay in train mode,
+            # but frozen portions (embedders, early blocks) stay in eval mode.
+            # We let super().train(mode) activate everything, then selectively
+            # revert frozen blocks to eval.
+            pass  # Individual blocks already have requires_grad=False where needed.
         return self
 
     def _prepare_labels(self, x, dummy_labels):
@@ -86,18 +124,30 @@ class Denoiser(nn.Module):
 
     def forward(self, x_rainy, x_clean, dummy_labels=None):
         """
-        注意：现在 forward 需要同时接收带雨图和干净图！
+        Training forward supporting three modes:
+          - JiT-only rectified flow (use_detail_refiner=0)
+          - Refiner-only: frozen JiT ODE -> refiner (use_detail_refiner=1, freeze_jit=1)
+          - Joint: JiT ODE with gradient -> refiner (use_detail_refiner=1, freeze_jit=0)
         """
         dummy_labels = self._prepare_labels(x_rainy, dummy_labels)
 
         if self.use_detail_refiner:
-            # Stage-2 training: JiT completes the ODE without retaining its
-            # graph, then MSDT runs exactly once and receives all gradients.
-            jit_prediction = self._generate_i2i_base(
-                x_rainy,
-                steps=self.steps,
-                dummy_labels=dummy_labels,
-            )
+            if self.freeze_jit:
+                # Stage-2 training: JiT completes the ODE without retaining its
+                # graph, then MSDT runs exactly once and receives all gradients.
+                jit_prediction = self._generate_i2i_base(
+                    x_rainy,
+                    steps=self.steps,
+                    dummy_labels=dummy_labels,
+                )
+            else:
+                # Joint training: JiT ODE retains gradients so both JiT (unfrozen
+                # blocks) and the refiner receive gradients.
+                jit_prediction = self._generate_i2i_base_with_grad(
+                    x_rainy,
+                    steps=self.steps,
+                    dummy_labels=dummy_labels,
+                )
             return self.detail_refiner(x_rainy, jit_prediction)
         # 1. 随机采样时间步 t (范围 0~1)
         # t=0 代表完全是雨图，t=1 代表完全是干净图
@@ -108,7 +158,7 @@ class Denoiser(nn.Module):
 
         # 3. 网络看着混合后的图像 z，预测终点 (完全干净的图)
         x_pred = self.net(z, t.flatten(), dummy_labels)
-        
+
         return x_pred
 
     # def forward(self, x, labels):
@@ -156,6 +206,29 @@ class Denoiser(nn.Module):
 
             # 3. 往前走一小步 (Euler Step)
             # z_next = z_current + Δt * v
+            z = z + (t_next - t) * v_pred
+
+        return z
+
+    def _generate_i2i_base_with_grad(self, x_rainy, steps=10, dummy_labels=None):
+        """Gradient-enabled version for joint JiT+refiner training.
+
+        When steps=1 the ODE reduces to a single forward pass:
+        z_next = x_rainy + (1-0) * (net(x_rainy, 0) - x_rainy) / 1 = net(x_rainy, 0)
+        """
+        if steps < 1:
+            raise ValueError(f"steps must be at least 1, got {steps}")
+        z = x_rainy.clone()
+        bsz = z.size(0)
+        device = z.device
+        dummy_labels = self._prepare_labels(z, dummy_labels)
+        timesteps = torch.linspace(0.0, 1.0, steps + 1, device=device).view(-1, *([1] * z.ndim)).expand(-1, bsz, -1, -1, -1)
+
+        for i in range(steps):
+            t = timesteps[i]
+            t_next = timesteps[i + 1]
+            x_pred = self.net(z, t.flatten(), dummy_labels)
+            v_pred = (x_pred - z) / (1.0 - t).clamp_min(self.t_eps)
             z = z + (t_next - t) * v_pred
 
         return z

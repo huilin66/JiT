@@ -16,7 +16,9 @@ from torch.utils.tensorboard import SummaryWriter
 
 import util.misc as misc
 from dataset import (
+    MixedRealPseudoDataset,
     PairedRainDataset,
+    PseudoRainTrainDataset,
     ScenePairedRainDataset,
     SceneValPatchDataset,
     ScenePairedRainDatasetV2,
@@ -107,6 +109,13 @@ def get_args_parser():
         default=0,
         help="Freeze JiT while training the post-ODE detail refiner.",
     )
+    parser.add_argument(
+        "--unfreeze_jit_last_blocks",
+        type=int,
+        default=0,
+        help="Unfreeze the last N JiT blocks for joint JiT+refiner training. "
+             "Requires --use_detail_refiner 1 and --freeze_jit 0.",
+    )
     parser.add_argument("--refiner_base_dim", type=int, default=32)
     parser.add_argument("--refiner_num_blocks", type=int, default=2)
     parser.add_argument("--refiner_use_frequency", type=int, default=1)
@@ -148,6 +157,12 @@ def get_args_parser():
         "--lr", type=float, default=None, metavar="LR", help="Learning rate (absolute)"
     )
     parser.add_argument(
+        "--lr_jit_last_blocks",
+        type=float,
+        default=0.0,
+        help="Optional lower LR for trainable JiT blocks during partial-unfreeze pseudo fine-tuning.",
+    )
+    parser.add_argument(
         "--blr",
         type=float,
         default=5e-5,
@@ -184,6 +199,51 @@ def get_args_parser():
     parser.add_argument("--loss_lpips_weight", default=0.5, type=float)
     parser.add_argument("--loss_edge_weight", default=0.0, type=float)
     parser.add_argument("--loss_freq_weight", default=0.0, type=float)
+    parser.add_argument(
+        "--loss_deep_lpips",
+        type=int,
+        default=0,
+        help="Use multi-layer VGG feature matching (deep perceptual loss) "
+             "instead of single-layer LPIPS. Higher weight recommended (1.0-3.0).",
+    )
+    parser.add_argument(
+        "--loss_deep_lpips_layers",
+        default="relu1_2,relu2_2,relu3_3",
+        type=str,
+        help="Comma-separated VGG layer names for deep LPIPS feature matching.",
+    )
+    parser.add_argument(
+        "--loss_lpips_warmup_ratio",
+        default=0.3,
+        type=float,
+        help="Fraction of total epochs before LPIPS loss activates. 0.0 = from start.",
+    )
+
+    # pseudo-label fine-tuning
+    parser.add_argument(
+        "--pseudo_data_path",
+        default="",
+        type=str,
+        help="Directory containing pseudo-GT PNG images. Enables mixed real+pseudo training.",
+    )
+    parser.add_argument(
+        "--pseudo_mask_dir",
+        default="",
+        type=str,
+        help="Directory containing pseudo restoration masks. Defaults to pseudo_data_path masks.",
+    )
+    parser.add_argument(
+        "--pseudo_ratio",
+        default=0.3,
+        type=float,
+        help="Target fraction of pseudo samples per epoch. 0.3 = 70:30 real:pseudo.",
+    )
+    parser.add_argument(
+        "--pseudo_loss_weight",
+        default=0.25,
+        type=float,
+        help="Weight multiplier for pseudo sample loss relative to real loss.",
+    )
     parser.add_argument(
         "--more_aug",
         type=int,
@@ -277,6 +337,12 @@ def get_args_parser():
         default=5,
         help="Frequency (in epochs) to save checkpoints",
     )
+    parser.add_argument(
+        "--save_epoch_freq",
+        type=int,
+        default=50,
+        help="Save numbered checkpoints every N completed epochs. 0 disables numbered saves.",
+    )
     parser.add_argument("--log_freq", default=100, type=int)
     parser.add_argument(
         "--device", default="cuda", help="Device to use for training/testing"
@@ -293,6 +359,93 @@ def get_args_parser():
     )
 
     return parser
+
+
+def _split_decay_named_params(named_params, weight_decay, lr=None, lr_scale=None):
+    decay = []
+    no_decay = []
+    for name, param in named_params:
+        if not param.requires_grad:
+            continue
+        if len(param.shape) == 1 or name.endswith(".bias") or "diffloss" in name:
+            no_decay.append(param)
+        else:
+            decay.append(param)
+
+    groups = []
+    for params, group_weight_decay in ((no_decay, 0.0), (decay, weight_decay)):
+        if not params:
+            continue
+        group = {"params": params, "weight_decay": group_weight_decay}
+        if lr is not None:
+            group["lr"] = lr
+        if lr_scale is not None:
+            group["lr_scale"] = lr_scale
+        groups.append(group)
+    return groups
+
+
+def build_optimizer_param_groups(model_without_ddp, args):
+    if args.unfreeze_jit_last_blocks <= 0:
+        return misc.add_weight_decay(model_without_ddp, args.weight_decay)
+
+    jit_lr = float(args.lr_jit_last_blocks or 0.0)
+    if jit_lr <= 0:
+        jit_lr = min(float(args.lr) * 0.2, 1e-6)
+        print(
+            f"[OPTIM] --lr_jit_last_blocks not set; using conservative fallback {jit_lr:.2e}"
+        )
+    if jit_lr > float(args.lr):
+        raise ValueError(
+            f"--lr_jit_last_blocks ({jit_lr}) must not exceed --lr ({args.lr})"
+        )
+
+    named = list(model_without_ddp.named_parameters())
+    refiner_named = [(n, p) for n, p in named if n.startswith("detail_refiner.")]
+    jit_named = [(n, p) for n, p in named if n.startswith("net.")]
+    other_named = [
+        (n, p)
+        for n, p in named
+        if not n.startswith("detail_refiner.") and not n.startswith("net.")
+    ]
+    jit_scale = jit_lr / float(args.lr)
+
+    print(
+        f"[OPTIM] Partial-unfreeze LRs: refiner/base lr={args.lr:.2e}, "
+        f"JiT last blocks lr={jit_lr:.2e} (lr_scale={jit_scale:.4f})"
+    )
+    groups = []
+    groups.extend(_split_decay_named_params(refiner_named, args.weight_decay))
+    groups.extend(
+        _split_decay_named_params(jit_named, args.weight_decay, lr_scale=jit_scale)
+    )
+    groups.extend(_split_decay_named_params(other_named, args.weight_decay))
+    return groups
+
+
+def print_trainable_summary(model, verbose=False):
+    trainable = []
+    frozen = []
+    for name, param in model.named_parameters():
+        item = (name, param.numel())
+        if param.requires_grad:
+            trainable.append(item)
+        else:
+            frozen.append(item)
+
+    trainable_numel = sum(n for _, n in trainable)
+    frozen_numel = sum(n for _, n in frozen)
+    print(
+        f"[PARAMS] trainable tensors={len(trainable)}, params={trainable_numel:,}; "
+        f"frozen tensors={len(frozen)}, params={frozen_numel:,}"
+    )
+    if verbose:
+        print("[PARAMS] Trainable parameter names:")
+        for name, numel in trainable:
+            print(f"  + {name} ({numel:,})")
+        print("[PARAMS] Frozen parameter names:")
+        for name, numel in frozen:
+            print(f"  - {name} ({numel:,})")
 
 
 def main(args):
@@ -337,19 +490,37 @@ def main(args):
 
     if not args.use_scene_dataset:
         print("[DATASET] use PairedRainDataset")
-        dataset_train = PairedRainDataset(
+        dataset_real = PairedRainDataset(
             rain_dir=os.path.join(args.data_path, "Drop"),
             clean_dir=os.path.join(args.data_path, "Clear"),
             transform=transform_train,
         )
     else:
         print("[DATASET] use ScenePairedRainDatasetV2")
-        dataset_train = ScenePairedRainDatasetV2(
+        dataset_real = ScenePairedRainDatasetV2(
             rain_dir=os.path.join(args.data_path, "Drop"),
             clean_dir=os.path.join(args.data_path, "Clear"),
             transform=transform_train,
             scene_path=args.scene_train_path,
         )
+
+    if args.pseudo_data_path:
+        pseudo_mask_dir = args.pseudo_mask_dir or ""
+        print(f"[DATASET] Adding pseudo-label data from {args.pseudo_data_path}")
+        dataset_pseudo = PseudoRainTrainDataset(
+            rain_dir=os.path.join(args.data_path, "Drop"),
+            pseudo_dir=args.pseudo_data_path,
+            mask_dir=pseudo_mask_dir or None,
+            transform=transform_train,
+            scene_path=args.scene_train_path if args.use_scene_dataset else None,
+        )
+        dataset_train = MixedRealPseudoDataset(
+            real_dataset=dataset_real,
+            pseudo_dataset=dataset_pseudo,
+            pseudo_ratio=args.pseudo_ratio,
+        )
+    else:
+        dataset_train = dataset_real
 
     sampler_train = torch.utils.data.DistributedSampler(
         dataset_train, num_replicas=num_tasks, rank=global_rank, shuffle=True
@@ -400,6 +571,7 @@ def main(args):
 
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"[MODEL] {model}, number of trainable parameters: {n_params / 1e6:.6f}M")
+    print_trainable_summary(model, verbose=bool(args.freeze_jit or args.unfreeze_jit_last_blocks))
 
     model.to(device)
 
@@ -422,7 +594,7 @@ def main(args):
     else:
         model_without_ddp = model
 
-    param_groups = misc.add_weight_decay(model_without_ddp, args.weight_decay)
+    param_groups = build_optimizer_param_groups(model_without_ddp, args)
     optimizer = torch.optim.AdamW(param_groups, lr=args.lr, betas=(0.9, 0.95))
     print(optimizer)
     # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
@@ -437,6 +609,10 @@ def main(args):
         target_w_edge=args.loss_edge_weight,
         target_w_freq=args.loss_freq_weight,
         total_epochs=args.epochs,
+        use_deep_lpips=bool(args.loss_deep_lpips),
+        deep_lpips_layers=args.loss_deep_lpips_layers,
+        lpips_warmup_ratio=args.loss_lpips_warmup_ratio,
+        pseudo_loss_weight=args.pseudo_loss_weight,
     )
 
     checkpoint_path = None
@@ -538,12 +714,13 @@ def main(args):
                 epoch_name="last",
             )
 
-        if epoch % 50 == 0 and epoch > 0:
+        if args.save_epoch_freq > 0 and (epoch + 1) % args.save_epoch_freq == 0:
             misc.save_model(
                 args=args,
                 model_without_ddp=model_without_ddp,
                 optimizer=optimizer,
                 epoch=epoch,
+                epoch_name=str(epoch + 1),
             )
         if args.online_eval and (epoch % args.eval_epoch == 0 or epoch + 1 == args.epochs):
             total_scores = evaluate_best_metric(

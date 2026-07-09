@@ -42,6 +42,12 @@ def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input-dirs", nargs="+", required=True)
     parser.add_argument("--weights", default="", help="Comma-separated weights. Default: uniform.")
+    parser.add_argument(
+        "--fusion",
+        default="weighted_mean",
+        choices=["weighted_mean", "median"],
+        help="Fusion method. median ignores --weights.",
+    )
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--archive-path", required=True)
     parser.add_argument("--history-csv", default="")
@@ -114,11 +120,16 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
     started = time.perf_counter()
     for name in tqdm(names):
-        accum = None
-        for weight, directory in zip(weights, input_dirs):
-            image = Image.open(directory / name).convert("RGB")
-            array = np.asarray(image, dtype=np.float64)
-            accum = array * weight if accum is None else accum + array * weight
+        arrays = [
+            np.asarray(Image.open(directory / name).convert("RGB"), dtype=np.float64)
+            for directory in input_dirs
+        ]
+        if args.fusion == "median":
+            accum = np.median(np.stack(arrays, axis=0), axis=0)
+        else:
+            accum = None
+            for weight, array in zip(weights, arrays):
+                accum = array * weight if accum is None else accum + array * weight
         out = np.rint(np.clip(accum, 0.0, 255.0)).astype(np.uint8)
         Image.fromarray(out, mode="RGB").save(output_dir / name, format="PNG", optimize=True)
     runtime = time.perf_counter() - started
@@ -133,7 +144,7 @@ def main():
             "archive_name": archive_path.name,
             "checkpoint": "|".join(str(path) for path in input_dirs),
             "state_key": "ensemble",
-            "architecture": "ensemble",
+            "architecture": args.fusion,
             "use_scene": "",
             "use_bg_subnet": "",
             "steps": "ensemble",

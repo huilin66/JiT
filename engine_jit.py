@@ -57,13 +57,25 @@ def train_one_epoch(
     if log_writer is not None:
         print("log_dir: {}".format(log_writer.log_dir))
 
-    for data_iter_step, (img_drop, img_clear, dummy_labels) in enumerate(
+    has_pseudo = False
+    for data_iter_step, batch in enumerate(
         metric_logger.log_every(data_loader, print_freq, header)
     ):
         # per iteration (instead of per epoch) lr scheduler
         lr_sched.adjust_learning_rate(
             optimizer, data_iter_step / len(data_loader) + epoch, args
         )
+
+        # Unpack batch: supports 3-tuple (real only), and 5-tuple (real+pseudo).
+        if len(batch) == 5:
+            img_drop, img_clear, is_pseudo, mask, dummy_labels = batch
+            is_pseudo = is_pseudo.to(device, non_blocking=True)
+            mask = mask.to(device, non_blocking=True)
+            has_pseudo = True
+        else:
+            img_drop, img_clear, dummy_labels = batch
+            is_pseudo = None
+            mask = None
 
         # normalize image to [-1, 1]
         x = _to_model_range(img_drop, device)
@@ -73,7 +85,7 @@ def train_one_epoch(
         with torch.amp.autocast("cuda", dtype=torch.bfloat16):
             y_pred = model(x, y, dummy_labels)
 
-        loss = criterion(y_pred, y)
+        loss = criterion(y_pred, y, is_pseudo=is_pseudo, x_rainy=x, mask=mask)
 
         loss_value = loss.item()
         if not math.isfinite(loss_value):
