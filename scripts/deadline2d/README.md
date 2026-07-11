@@ -43,7 +43,6 @@ Run JiT and MSDT separately when checkpoint paths need adjustment:
 
 ```bash
 GPU=0 DATA_ROOT=/path/to/eccv_dn \
-SCENE_JSON=/path/to/jit_submit_best_model_ema1_s1_r16_hflip_rot90_20260710_151804.json \
 JIT_B_CKPT=/path/to/jit_b_checkpoint_dir \
 JIT_L_CKPT=/path/to/jit_l_checkpoint_dir \
 bash scripts/deadline2d/infer_jit_1x5090.sh
@@ -52,6 +51,12 @@ GPU=0 MSDT_ROOT=/path/to/MSDT DATA_ROOT=/path/to/eccv_dn \
 FT_ROOT=/path/to/MSDT/checkpoints/deadline2d_3x3090 \
 bash scripts/deadline2d/infer_msdt_1x5090.sh
 ```
+
+JiT inference predicts a fresh two-class scene JSON by default with
+`run/scene_convnext_focus_2scene_v1/checkpoint-best.pth`, validates exact input
+coverage and labels, then reuses it for JiT-B and JiT-L. Set
+`SCENE_CKPT=/path/to/checkpoint-best.pth` to select another classifier, or set
+`SCENE_JSON=/path/to/existing.json` to deliberately skip scene prediction.
 
 Or run the full sequence, including the small fusion candidate set:
 
