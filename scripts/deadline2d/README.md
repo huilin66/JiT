@@ -48,7 +48,7 @@ JIT_L_CKPT=/path/to/jit_l_checkpoint_dir \
 bash scripts/deadline2d/infer_jit_1x5090.sh
 
 GPU=0 MSDT_ROOT=/path/to/MSDT DATA_ROOT=/path/to/eccv_dn \
-FT_ROOT=/path/to/MSDT/checkpoints/deadline2d_3x3090 \
+FT_ROOT=/path/to/JiT/run/deadline2d_3x3090 \
 bash scripts/deadline2d/infer_msdt_1x5090.sh
 ```
 

@@ -17,6 +17,22 @@ if [[ -f "${MSDT_ENV}" ]]; then source "${MSDT_ENV}"; fi
 : "${JIT_B_DIR:?Set JIT_B_DIR or provide JIT_ENV}"
 : "${JIT_L_DIR:?Set JIT_L_DIR or provide JIT_ENV}"
 
+# Older infer_jit_1x5090.sh manifests could accidentally record the archive
+# instead of its sibling PNG directory because both matched the same glob.
+normalize_jit_dir() {
+  local path="$1"
+  if [[ -f "${path}" && "${path}" == *.zip && -d "${path%.zip}" ]]; then
+    path="${path%.zip}"
+  fi
+  if [[ ! -d "${path}" ]]; then
+    echo "JiT PNG directory not found: ${path}" >&2
+    return 2
+  fi
+  printf '%s\n' "${path}"
+}
+JIT_B_DIR=$(normalize_jit_dir "${JIT_B_DIR}")
+JIT_L_DIR=$(normalize_jit_dir "${JIT_L_DIR}")
+
 if [[ -z "${MSDT_PRIMARY_DIR:-}" ]]; then
   MSDT_PRIMARY_DIR=${MSDT_FT_EDGE_DIR:-${MSDT_FT_BASELINE_DIR:-${MSDT_ORIGINAL_NO_SCENE_DIR:-}}}
 fi

@@ -10,9 +10,9 @@ cd "${MSDT_ROOT}"
 GPU=${GPU:-0}
 DATA_ROOT=${DATA_ROOT:-D:/zhl/data/eccv_dn}
 INPUT_DIR=${INPUT_DIR:-${DATA_ROOT}/test-input}
-SCENE_JSON=${SCENE_JSON:-${DATA_ROOT}/test_pred_v1.json}
+SCENE_JSON=${SCENE_JSON:-${JIT_ROOT}/submissions/deadline2d/jit/scene_predictions/deadline_focus_2scene.json}
 OUTPUT_ROOT=${OUTPUT_ROOT:-${MSDT_ROOT}/submissions/deadline2d}
-FT_ROOT=${FT_ROOT:-${MSDT_ROOT}/checkpoints/deadline2d_3x3090}
+FT_ROOT=${FT_ROOT:-${JIT_ROOT}/run/deadline2d_3x3090}
 EXPECTED_COUNT=${EXPECTED_COUNT:-592}
 HISTORY_CSV=${HISTORY_CSV:-${OUTPUT_ROOT}/submission_history.csv}
 

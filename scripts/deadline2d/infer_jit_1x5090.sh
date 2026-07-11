@@ -102,8 +102,13 @@ run_jit() {
   bash scripts/submit_jit_from_local_config.sh
 
   shopt -s nullglob
-  local matches=("${OUTPUT_ROOT}/deadline_${tag}_best_"*)
+  local candidates=("${OUTPUT_ROOT}/deadline_${tag}_best_"*)
   shopt -u nullglob
+  local matches=()
+  local candidate
+  for candidate in "${candidates[@]}"; do
+    [[ -d "${candidate}" ]] && matches+=("${candidate}")
+  done
   if [[ ${#matches[@]} -eq 0 ]]; then
     echo "Cannot locate output directory for deadline_${tag}" >&2
     exit 2

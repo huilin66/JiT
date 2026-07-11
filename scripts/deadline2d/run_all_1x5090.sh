@@ -11,13 +11,15 @@ MSDT_ROOT=${MSDT_ROOT:-"$(cd "${ROOT}/../MSDT" && pwd)"}
 JIT_OUTPUT_ROOT=${JIT_OUTPUT_ROOT:-${ROOT}/submissions/deadline2d/jit}
 MSDT_OUTPUT_ROOT=${MSDT_OUTPUT_ROOT:-${MSDT_ROOT}/submissions/deadline2d}
 FUSION_OUTPUT_ROOT=${FUSION_OUTPUT_ROOT:-${ROOT}/submissions/deadline2d/fusion}
+FT_ROOT=${FT_ROOT:-${ROOT}/run/deadline2d_3x3090}
 
 GPU="${GPU}" DATA_ROOT="${DATA_ROOT}" INPUT_DIR="${INPUT_DIR}" \
   OUTPUT_ROOT="${JIT_OUTPUT_ROOT}" \
   bash scripts/deadline2d/infer_jit_1x5090.sh
 
 GPU="${GPU}" DATA_ROOT="${DATA_ROOT}" INPUT_DIR="${INPUT_DIR}" MSDT_ROOT="${MSDT_ROOT}" \
-  OUTPUT_ROOT="${MSDT_OUTPUT_ROOT}" \
+  OUTPUT_ROOT="${MSDT_OUTPUT_ROOT}" FT_ROOT="${FT_ROOT}" \
+  SCENE_JSON="${JIT_OUTPUT_ROOT}/scene_predictions/deadline_focus_2scene.json" \
   bash scripts/deadline2d/infer_msdt_1x5090.sh
 
 INPUT_DIR="${INPUT_DIR}" \
