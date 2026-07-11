@@ -27,7 +27,6 @@ fi
 required_paths=(
   "${MSDT_ROOT}/train_raindrop.py"
   "${MSDT_ROOT}/configs/raindrop_no_scene.yaml"
-  "${MSDT_ROOT}/splits/raindrop_split.json"
   "${SOURCE_CKPT}"
   "${DATA_PATH}/Drop"
   "${DATA_PATH}/Clear"
@@ -38,6 +37,12 @@ for path in "${required_paths[@]}"; do
     exit 2
   fi
 done
+
+echo "[preflight] creating or validating the deterministic group split"
+python "${JIT_ROOT}/tools/ensure_msdt_split.py" \
+  --msdt-root "${MSDT_ROOT}" \
+  --data-root "${DATA_PATH}" \
+  --config configs/raindrop_no_scene.yaml
 
 visible_gpus=$(IFS=,; echo "${gpu_list[*]}")
 echo "[preflight] checking CUDA devices ${visible_gpus}"

@@ -5,8 +5,9 @@ These scripts keep the deadline experiment matrix intentionally small.
 ## 1. Three parallel RTX 3090 fine-tunes
 
 Run from the JiT repository. The MSDT repository is expected at `../MSDT` unless
-`MSDT_ROOT` is set. The existing group split manifest is required so all three
-runs use exactly the same validation groups.
+`MSDT_ROOT` is set. If `MSDT/splits/raindrop_split.json` is missing, the launcher
+creates it deterministically in one process before starting the three GPUs. If it
+already exists, its group/sample fingerprints are validated and it is reused.
 
 ```bash
 MSDT_ROOT=/path/to/MSDT \

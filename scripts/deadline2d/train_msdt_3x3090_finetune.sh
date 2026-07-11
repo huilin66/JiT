@@ -22,7 +22,7 @@ if [[ ${#gpu_list[@]} -ne 3 ]]; then
   echo "GPUS must contain exactly three GPU ids, e.g. GPUS=\"0 1 2\"" >&2
   exit 2
 fi
-for required in "${SOURCE_CKPT}" "${MSDT_ROOT}/train_raindrop.py" "${MSDT_ROOT}/splits/raindrop_split.json"; do
+for required in "${SOURCE_CKPT}" "${MSDT_ROOT}/train_raindrop.py"; do
   if [[ ! -e "${required}" ]]; then
     echo "Missing required path: ${required}" >&2
     exit 2
@@ -32,6 +32,13 @@ if [[ ! -d "${DATA_PATH}/Drop" || ! -d "${DATA_PATH}/Clear" ]]; then
   echo "DATA_PATH must contain Drop and Clear: ${DATA_PATH}" >&2
   exit 2
 fi
+
+# A single process creates/validates the deterministic manifest before the
+# three workers start. This prevents a first-run write race between GPUs.
+python "${JIT_ROOT}/tools/ensure_msdt_split.py" \
+  --msdt-root "${MSDT_ROOT}" \
+  --data-root "${DATA_PATH}" \
+  --config configs/raindrop_no_scene.yaml
 
 mkdir -p "${OUT_ROOT}/logs"
 PREPARED_CKPT="${OUT_ROOT}/prepared_finetune_init.pth"
