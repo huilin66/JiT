@@ -21,6 +21,21 @@ variant per GPU, and writes separate logs/metrics/checkpoints below
 `MSDT/checkpoints/deadline2d_3x3090` by default. Select the run using validation
 `Score`, with PSNR/SSIM/LPIPS checked individually for oversmoothing.
 
+Before the full run, execute the fast three-GPU smoke test. Each GPU performs
+one train step and validates one image; it also checks BF16, finite gradients,
+an actual parameter update, metrics, and checkpoint creation:
+
+```bash
+MSDT_ROOT=/path/to/MSDT \
+DATA_PATH=/path/to/RainDrop_Train \
+SOURCE_CKPT=/path/to/MSDT/checkpoints/msdt_1x5090/no_scene/model_best.pth \
+GPUS="0 1 2" \
+bash scripts/deadline2d/smoke_test_msdt_3x3090_finetune.sh
+```
+
+Only start the full eight-epoch run after the script prints
+`SMOKE_TEST_PASSED`.
+
 ## 2. One RTX 5090 inference
 
 Run JiT and MSDT separately when checkpoint paths need adjustment:
