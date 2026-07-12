@@ -5,7 +5,7 @@ DATA_ROOT=${DATA_ROOT:-D:/zhl/data/eccv_dn/RainDrop_Train}
 OUT_ROOT=${OUT_ROOT:-${ROOT}/run/deadline2d_p2_fast_bc-refiner}
 JIT_B_CKPT=${JIT_B_CKPT:-${ROOT}/run/train/b16_focus_2scene_msdt_refiner_plan_c12_01_c1_higher_than_c_1x5090/16/checkpoint-last.pth}
 JIT_STATE_KEY=${JIT_STATE_KEY:-model_ema1}
-GPUS=${GPUS:-"0 1 2"}; EPOCHS=${EPOCHS:-12}; BATCH_SIZE=${BATCH_SIZE:-16}; NUM_WORKERS=${NUM_WORKERS:-8}
+GPUS=${GPUS:-"0 1 2"}; EPOCHS=${EPOCHS:-100}; BATCH_SIZE=${BATCH_SIZE:-16}; NUM_WORKERS=${NUM_WORKERS:-8}
 MAX_TRAIN_STEPS=${MAX_TRAIN_STEPS:-0}; MAX_VAL_BATCHES=${MAX_VAL_BATCHES:-0}
 read -r -a gpu <<<"${GPUS}"; [[ ${#gpu[@]} -eq 3 ]] || { echo 'GPUS needs exactly 3 ids' >&2; exit 2; }
 [[ -d "${DATA_ROOT}/Blur" && -d "${DATA_ROOT}/Clear" ]] || { echo "Missing Blur/Clear under ${DATA_ROOT}" >&2; exit 2; }

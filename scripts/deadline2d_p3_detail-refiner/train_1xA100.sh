@@ -2,7 +2,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 GPU=${GPU:-0}; DATA_ROOT=${DATA_ROOT:-D:/zhl/data/eccv_dn/RainDrop_Train}
-OUT_ROOT=${OUT_ROOT:-${ROOT}/run/deadline2d_p3_detail-refiner}; EPOCHS=${EPOCHS:-20}; BATCH_SIZE=${BATCH_SIZE:-8}; NUM_WORKERS=${NUM_WORKERS:-12}
+OUT_ROOT=${OUT_ROOT:-${ROOT}/run/deadline2d_p3_detail-refiner}; EPOCHS=${EPOCHS:-120}; BATCH_SIZE=${BATCH_SIZE:-8}; NUM_WORKERS=${NUM_WORKERS:-12}
 JIT_B_CKPT=${JIT_B_CKPT:-${ROOT}/run/train/b16_focus_2scene_msdt_refiner_plan_c12_01_c1_higher_than_c_1x5090/16/checkpoint-last.pth}
 JIT_STATE_KEY=${JIT_STATE_KEY:-model_ema1}
 MAX_TRAIN_STEPS=${MAX_TRAIN_STEPS:-0}; MAX_VAL_BATCHES=${MAX_VAL_BATCHES:-0}

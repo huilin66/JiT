@@ -31,6 +31,9 @@ Inference defaults to score-best; set `BEST_KIND=psnr` to use PSNR-best.
 
 ## P2: fast JiT-MSDT Blur->Clear continuation on 3x3090
 
+The default formal schedule is 100 epochs (roughly 3.5--4 hours when one epoch
+including validation takes about two minutes).
+
 Smoke test first:
 
 ```bash
@@ -55,6 +58,9 @@ selected checkpoint before refinement. Set `SCENE_JSON` to reuse a verified
 two-class JSON; otherwise JiT's scene classifier runs automatically.
 
 ## P3: frequency DetailRefiner on 1xA100
+
+The default formal schedule is 120 epochs. Score-best and PSNR-best are saved
+independently throughout the run.
 
 ```bash
 DATA_ROOT=/path/to/RainDrop_Train OUT_ROOT=/path/to/p3_smoke \
