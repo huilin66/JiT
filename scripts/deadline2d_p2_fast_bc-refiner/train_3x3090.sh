@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-DATA_ROOT=${DATA_ROOT:-D:/zhl/data/eccv_dn/RainDrop_Train}
+DATA_ROOT=${DATA_ROOT:-/root/huilin/data/eccv_dn/RainDrop_Train}
 OUT_ROOT=${OUT_ROOT:-${ROOT}/run/deadline2d_p2_fast_bc-refiner}
 JIT_B_CKPT=${JIT_B_CKPT:-${ROOT}/run/train/b16_focus_2scene_msdt_refiner_plan_c12_01_c1_higher_than_c_1x5090/16/checkpoint-last.pth}
 JIT_STATE_KEY=${JIT_STATE_KEY:-model_ema1}

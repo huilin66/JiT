@@ -8,7 +8,7 @@ set -euo pipefail
 
 JIT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 MSDT_ROOT=${MSDT_ROOT:-"$(cd "${JIT_ROOT}/../MSDT" && pwd)"}
-DATA_PATH=${DATA_PATH:-D:/zhl/data/eccv_dn/RainDrop_Train}
+DATA_PATH=${DATA_PATH:-/root/huilin/data/eccv_dn/RainDrop_Train}
 SOURCE_CKPT=${SOURCE_CKPT:-${MSDT_ROOT}/checkpoints/msdt_1x5090/no_scene/model_best.pth}
 SMOKE_ROOT=${SMOKE_ROOT:-${MSDT_ROOT}/checkpoints/deadline2d_smoke_$(date +%Y%m%d_%H%M%S)}
 
