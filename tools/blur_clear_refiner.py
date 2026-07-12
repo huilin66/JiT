@@ -10,6 +10,7 @@ import json
 import math
 import random
 import re
+import sys
 import time
 import zipfile
 from pathlib import Path
@@ -21,6 +22,13 @@ import torch.nn.functional as F
 from PIL import Image
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
+
+# Direct execution (`python tools/blur_clear_refiner.py`) puts only tools/ on
+# sys.path. Add the JiT repository root so root-level model modules resolve on
+# both Linux servers and Windows workstations.
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from model_jit import BackgroundRestorationSubnet
 from model_msdt_refiner import MSDTDetailRefiner
