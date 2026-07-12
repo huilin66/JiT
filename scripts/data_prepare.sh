@@ -5,7 +5,7 @@ set -euo pipefail
 # DATA_ROOT=${DATA_ROOT:-/root/huilin/data/eccv_dn}
 # DATA_ROOT="/root/huilin/data/eccv_dn"
 # DATA_ROOT="/scrinvme/huilin/tp/eccv_dn"
-DATA_ROOT="D:\zhl\data\eccv_dn"
+DATA_ROOT=${DATA_ROOT:-D:/zhl/data/eccv_dn}
 
 
 SCENE_NUM_WORKERS=${SCENE_NUM_WORKERS:-8}
@@ -24,7 +24,8 @@ python tools/data_tools.py drop-scene-samples \
 python tools/data_tools.py copy \
   --day-root "${DATA_ROOT}/DayRainDrop_Train" \
   --night-root "${DATA_ROOT}/NightRainDrop_Train" \
-  --dst-root "${DATA_ROOT}/RainDrop_Train"
+  --dst-root "${DATA_ROOT}/RainDrop_Train" \
+  --blur-dir-name Blur
 
 
 python tools/data_tools.py manual-blur-scenes \

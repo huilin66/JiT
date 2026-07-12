@@ -502,22 +502,34 @@ def generate_day_night_scene_labels(
     return scene_dict
 
 
-def copy_data(src_dir, dst_dir, drop_dir_name="Drop", clear_dir_name="Clear", type_name="Day"):
+def copy_data(
+    src_dir,
+    dst_dir,
+    drop_dir_name="Drop",
+    clear_dir_name="Clear",
+    blur_dir_name="Blur",
+    type_name="Day",
+):
     dst_dir = Path(dst_dir)
     dst_dir_drop = dst_dir / drop_dir_name
     dst_dir_clear = dst_dir / clear_dir_name
+    dst_dir_blur = dst_dir / blur_dir_name
     ensure_dir(dst_dir_drop)
     ensure_dir(dst_dir_clear)
+    ensure_dir(dst_dir_blur)
 
     src_dir = Path(src_dir)
     src_dir_drop = src_dir / drop_dir_name
     src_dir_clear = src_dir / clear_dir_name
+    src_dir_blur = src_dir / blur_dir_name
 
-    if not src_dir_drop.exists() or not src_dir_clear.exists():
-        raise RuntimeError(f"Expected {src_dir_drop} and {src_dir_clear} to exist.")
+    missing = [path for path in (src_dir_drop, src_dir_blur, src_dir_clear) if not path.exists()]
+    if missing:
+        raise RuntimeError("Missing source image folders: " + ", ".join(str(path) for path in missing))
 
     for src_root, dst_root, desc in [
         (src_dir_drop, dst_dir_drop, f"Copy {type_name} Drop"),
+        (src_dir_blur, dst_dir_blur, f"Copy {type_name} Blur"),
         (src_dir_clear, dst_dir_clear, f"Copy {type_name} Clear"),
     ]:
         sub_dirs = sorted(p for p in src_root.iterdir() if p.is_dir())
@@ -527,14 +539,27 @@ def copy_data(src_dir, dst_dir, drop_dir_name="Drop", clear_dir_name="Clear", ty
                 shutil.copy2(src_file, dst_file)
 
 
-def copy_day_night(day_root, night_root, dst_root, drop_dir_name="Drop", clear_dir_name="Clear"):
+def copy_day_night(
+    day_root,
+    night_root,
+    dst_root,
+    drop_dir_name="Drop",
+    clear_dir_name="Clear",
+    blur_dir_name="Blur",
+):
     if day_root:
-        copy_data(day_root, dst_root, drop_dir_name, clear_dir_name, type_name="Day")
+        copy_data(day_root, dst_root, drop_dir_name, clear_dir_name, blur_dir_name, type_name="Day")
     if night_root:
-        copy_data(night_root, dst_root, drop_dir_name, clear_dir_name, type_name="Night")
+        copy_data(night_root, dst_root, drop_dir_name, clear_dir_name, blur_dir_name, type_name="Night")
 
 
-def check_trainable_folder(data_root, scene_json=None, drop_dir_name="Drop", clear_dir_name="Clear"):
+def check_trainable_folder(
+    data_root,
+    scene_json=None,
+    drop_dir_name="Drop",
+    clear_dir_name="Clear",
+    blur_dir_name="",
+):
     data_root = Path(data_root)
     drop_dir = data_root / drop_dir_name
     clear_dir = data_root / clear_dir_name
@@ -556,6 +581,22 @@ def check_trainable_folder(data_root, scene_json=None, drop_dir_name="Drop", cle
         print(f"First missing Clear: {missing_clear[0]}")
     if missing_drop:
         print(f"First missing Drop: {missing_drop[0]}")
+
+    if blur_dir_name:
+        blur_dir = data_root / blur_dir_name
+        if not blur_dir.exists():
+            raise RuntimeError(f"Missing Blur directory: {blur_dir}")
+        blur_files = {p.name for p in list_images(blur_dir, recursive=False)}
+        missing_blur = sorted(drop_files - blur_files)
+        extra_blur = sorted(blur_files - drop_files)
+        print(f"Blur images: {len(blur_files)}")
+        print(f"Missing Blur pairs: {len(missing_blur)}")
+        print(f"Extra Blur pairs: {len(extra_blur)}")
+        if missing_blur or extra_blur or drop_files != clear_files:
+            raise RuntimeError(
+                "Drop/Blur/Clear filename sets differ: "
+                f"drop={len(drop_files)}, blur={len(blur_files)}, clear={len(clear_files)}"
+            )
 
     scene_json = Path(scene_json) if scene_json else data_root / "Drop_scen_pred.json"
     if scene_json.exists():
@@ -921,12 +962,13 @@ def build_parser():
     parser = argparse.ArgumentParser("Raindrop data tools")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    copy_parser = subparsers.add_parser("copy", help="Merge Day/Night data into flat Drop/Clear folders")
-    copy_parser.add_argument("--day-root", default="", help="Root containing Day Drop/Clear folders")
-    copy_parser.add_argument("--night-root", default="", help="Root containing Night Drop/Clear folders")
+    copy_parser = subparsers.add_parser("copy", help="Merge Day/Night data into flat Drop/Blur/Clear folders")
+    copy_parser.add_argument("--day-root", default="", help="Root containing Day Drop/Blur/Clear folders")
+    copy_parser.add_argument("--night-root", default="", help="Root containing Night Drop/Blur/Clear folders")
     copy_parser.add_argument("--dst-root", required=True, help="Output trainable data root")
     copy_parser.add_argument("--drop-dir-name", default="Drop")
     copy_parser.add_argument("--clear-dir-name", default="Clear")
+    copy_parser.add_argument("--blur-dir-name", default="Blur")
 
     pseudo_parser = subparsers.add_parser(
         "pseudo-scene",
@@ -1075,8 +1117,14 @@ def main():
             dst_root=args.dst_root,
             drop_dir_name=args.drop_dir_name,
             clear_dir_name=args.clear_dir_name,
+            blur_dir_name=args.blur_dir_name,
         )
-        check_trainable_folder(args.dst_root, drop_dir_name=args.drop_dir_name, clear_dir_name=args.clear_dir_name)
+        check_trainable_folder(
+            args.dst_root,
+            drop_dir_name=args.drop_dir_name,
+            clear_dir_name=args.clear_dir_name,
+            blur_dir_name=args.blur_dir_name,
+        )
         return
 
     if args.command == "pseudo-scene":
