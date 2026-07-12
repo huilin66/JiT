@@ -12,7 +12,7 @@ DATA_ROOT=${DATA_ROOT:-D:/zhl/data/eccv_dn}
 INPUT_DIR=${INPUT_DIR:-${DATA_ROOT}/test-input}
 SCENE_JSON=${SCENE_JSON:-${JIT_ROOT}/submissions/deadline2d/jit/scene_predictions/deadline_focus_2scene.json}
 OUTPUT_ROOT=${OUTPUT_ROOT:-${MSDT_ROOT}/submissions/deadline2d}
-FT_ROOT=${FT_ROOT:-${JIT_ROOT}/run/deadline2d_3x3090}
+FT_ROOT=${FT_ROOT:-${MSDT_ROOT}/checkpoints/deadline2d_3x3090}
 EXPECTED_COUNT=${EXPECTED_COUNT:-592}
 HISTORY_CSV=${HISTORY_CSV:-${OUTPUT_ROOT}/submission_history.csv}
 
@@ -31,6 +31,17 @@ fi
 mkdir -p "${OUTPUT_ROOT}"
 env_path="${OUTPUT_ROOT}/msdt_outputs.env"
 : >"${env_path}"
+
+if [[ "${RUN_FINETUNES}" == "1" ]]; then
+  for name in baseline edge edge_freq; do
+    checkpoint="${FT_ROOT}/${name}/model_best.pth"
+    if [[ ! -f "${checkpoint}" ]]; then
+      echo "Missing required fine-tuned MSDT checkpoint: ${checkpoint}" >&2
+      echo "Set FT_ROOT to the directory containing baseline/, edge/, and edge_freq/." >&2
+      exit 2
+    fi
+  done
+fi
 
 run_msdt() {
   local tag="$1"
