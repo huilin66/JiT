@@ -54,11 +54,17 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--train-copy-prefix", default="test_pseudo_")
     parser.add_argument("--focus2scene-json", default="", help="Original Drop_focus_2scene.json to extend.")
+    parser.add_argument("--blur2scene-json", default="", help="Original Drop_blur_2scene.json to extend.")
     parser.add_argument("--dn-blur-4scene-json", default="", help="Original Drop_dn_blur_4scene.json to extend.")
     parser.add_argument(
         "--output-focus2scene-json",
         default="",
         help="Default: <RainDrop_Train>/Drop_focus_2scene_test_pseudo.json.",
+    )
+    parser.add_argument(
+        "--output-blur2scene-json",
+        default="",
+        help="Default: <RainDrop_Train>/Drop_blur_2scene_test_pseudo.json.",
     )
     parser.add_argument(
         "--output-dn-blur-4scene-json",
@@ -485,8 +491,9 @@ def precheck_args(args: argparse.Namespace) -> None:
             if not path.is_dir():
                 missing.append(path)
         focus_json = Path(args.focus2scene_json) if args.focus2scene_json else rain_train_dir / "Drop_focus_2scene.json"
+        blur_json = Path(args.blur2scene_json) if args.blur2scene_json else rain_train_dir / "Drop_blur_2scene.json"
         dn_blur_json = Path(args.dn_blur_4scene_json) if args.dn_blur_4scene_json else rain_train_dir / "Drop_dn_blur_4scene.json"
-        for path in (focus_json, dn_blur_json):
+        for path in (focus_json, blur_json, dn_blur_json):
             if not path.is_file():
                 missing.append(path)
 
@@ -573,30 +580,38 @@ def update_scene_jsons(
     image_mapping: dict[str, dict[str, object]],
     copied_mapping: dict[str, dict[str, str]],
     focus_json: Path,
+    blur_json: Path,
     dn_blur_json: Path,
     output_focus_json: Path,
+    output_blur_json: Path,
     output_dn_blur_json: Path,
 ) -> dict[str, object]:
     focus_labels = load_json_dict(focus_json)
+    blur_labels = load_json_dict(blur_json)
     dn_blur_labels = load_json_dict(dn_blur_json)
     added: dict[str, dict[str, int]] = {}
 
     for test_name, info in image_mapping.items():
         train_name = copied_mapping[test_name]["train_name"]
         focus2, dn_blur4, gid = pseudo_scene_flags(info)
+        blur2 = dn_blur4 % 2
         focus_labels[train_name] = focus2
+        blur_labels[train_name] = blur2
         dn_blur_labels[train_name] = dn_blur4
         added[train_name] = {
             "source_test_file": test_name,
             "group_id": gid,
             "focus2": focus2,
+            "blur2": blur2,
             "dn_blur4": dn_blur4,
         }
 
     write_json(output_focus_json, focus_labels)
+    write_json(output_blur_json, blur_labels)
     write_json(output_dn_blur_json, dn_blur_labels)
     return {
         "focus2_json": str(output_focus_json.resolve()),
+        "blur2_json": str(output_blur_json.resolve()),
         "dn_blur4_json": str(output_dn_blur_json.resolve()),
         "added": added,
         "added_count": len(added),
@@ -650,25 +665,33 @@ def main() -> None:
         write_json(output_root / "test_pseudo_train_copy_mapping.json", copied_train_mapping)
 
         focus_json = Path(args.focus2scene_json) if args.focus2scene_json else rain_train_dir / "Drop_focus_2scene.json"
+        blur_json = Path(args.blur2scene_json) if args.blur2scene_json else rain_train_dir / "Drop_blur_2scene.json"
         dn_blur_json = Path(args.dn_blur_4scene_json) if args.dn_blur_4scene_json else rain_train_dir / "Drop_dn_blur_4scene.json"
         output_focus_json = (
             Path(args.output_focus2scene_json)
             if args.output_focus2scene_json
             else rain_train_dir / "Drop_focus_2scene_test_pseudo.json"
         )
+        output_blur_json = (
+            Path(args.output_blur2scene_json)
+            if args.output_blur2scene_json
+            else rain_train_dir / "Drop_blur_2scene_test_pseudo.json"
+        )
         output_dn_blur_json = (
             Path(args.output_dn_blur_4scene_json)
             if args.output_dn_blur_4scene_json
             else rain_train_dir / "Drop_dn_blur_4scene_test_pseudo.json"
         )
-        missing_scene_jsons = [path for path in (focus_json, dn_blur_json) if not path.exists()]
+        missing_scene_jsons = [path for path in (focus_json, blur_json, dn_blur_json) if not path.exists()]
         raise_missing_paths("Missing scene JSON files", missing_scene_jsons)
         scene_update = update_scene_jsons(
             image_mapping=image_mapping,
             copied_mapping=copied_train_mapping,
             focus_json=focus_json,
+            blur_json=blur_json,
             dn_blur_json=dn_blur_json,
             output_focus_json=output_focus_json,
+            output_blur_json=output_blur_json,
             output_dn_blur_json=output_dn_blur_json,
         )
         write_json(output_root / "test_pseudo_scene_update_manifest.json", scene_update)

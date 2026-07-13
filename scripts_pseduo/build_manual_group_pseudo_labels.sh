@@ -24,8 +24,10 @@ PSEUDO_LABEL_DIR=${PSEUDO_LABEL_DIR:-}
 
 RAIN_TRAIN_DIR=${RAIN_TRAIN_DIR:-${DATA_ROOT}/RainDrop_Train}
 FOCUS2SCENE_JSON=${FOCUS2SCENE_JSON:-${RAIN_TRAIN_DIR}/Drop_focus_2scene.json}
+BLUR2SCENE_JSON=${BLUR2SCENE_JSON:-${RAIN_TRAIN_DIR}/Drop_blur_2scene.json}
 DN_BLUR_4SCENE_JSON=${DN_BLUR_4SCENE_JSON:-${RAIN_TRAIN_DIR}/Drop_dn_blur_4scene.json}
 OUTPUT_FOCUS2SCENE_JSON=${OUTPUT_FOCUS2SCENE_JSON:-${RAIN_TRAIN_DIR}/Drop_focus_2scene_test_pseudo.json}
+OUTPUT_BLUR2SCENE_JSON=${OUTPUT_BLUR2SCENE_JSON:-${RAIN_TRAIN_DIR}/Drop_blur_2scene_test_pseudo.json}
 OUTPUT_DN_BLUR_4SCENE_JSON=${OUTPUT_DN_BLUR_4SCENE_JSON:-${RAIN_TRAIN_DIR}/Drop_dn_blur_4scene_test_pseudo.json}
 
 TEST_GROUPS_CSV=${TEST_GROUPS_CSV:-${ROOT_DIR}/demo/test_group_from_folders.csv}
@@ -70,6 +72,7 @@ check_dir "RAIN_TRAIN_DIR" "${RAIN_TRAIN_DIR}"
 check_dir "RainDrop_Train/Drop" "${RAIN_TRAIN_DIR}/Drop"
 check_dir "RainDrop_Train/Clear" "${RAIN_TRAIN_DIR}/Clear"
 check_file "FOCUS2SCENE_JSON" "${FOCUS2SCENE_JSON}"
+check_file "BLUR2SCENE_JSON" "${BLUR2SCENE_JSON}"
 check_file "DN_BLUR_4SCENE_JSON" "${DN_BLUR_4SCENE_JSON}"
 if [[ -n "${TEST_GROUPS_CSV}" ]]; then
   check_file "TEST_GROUPS_CSV" "${TEST_GROUPS_CSV}"
@@ -93,8 +96,10 @@ args=(
   --output-root "${OUTPUT_ROOT}"
   --rain-train-dir "${RAIN_TRAIN_DIR}"
   --focus2scene-json "${FOCUS2SCENE_JSON}"
+  --blur2scene-json "${BLUR2SCENE_JSON}"
   --dn-blur-4scene-json "${DN_BLUR_4SCENE_JSON}"
   --output-focus2scene-json "${OUTPUT_FOCUS2SCENE_JSON}"
+  --output-blur2scene-json "${OUTPUT_BLUR2SCENE_JSON}"
   --output-dn-blur-4scene-json "${OUTPUT_DN_BLUR_4SCENE_JSON}"
   --test-groups-csv "${TEST_GROUPS_CSV}"
   --drop-group-mode "${DROP_GROUP_MODE}"
@@ -133,6 +138,7 @@ echo "MANUAL_PAIR_DIR=${MANUAL_PAIR_DIR}"
 echo "OUTPUT_ROOT=${OUTPUT_ROOT}"
 echo "RAIN_TRAIN_DIR=${RAIN_TRAIN_DIR}"
 echo "OUTPUT_FOCUS2SCENE_JSON=${OUTPUT_FOCUS2SCENE_JSON}"
+echo "OUTPUT_BLUR2SCENE_JSON=${OUTPUT_BLUR2SCENE_JSON}"
 echo "OUTPUT_DN_BLUR_4SCENE_JSON=${OUTPUT_DN_BLUR_4SCENE_JSON}"
 echo "============================================================"
 
