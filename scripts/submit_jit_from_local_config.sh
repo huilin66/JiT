@@ -15,7 +15,7 @@ CONFIG_CSV=${CONFIG_CSV:-}
 CONFIG_ROW=${CONFIG_ROW:-}
 CONFIG_MODEL_NAME=${CONFIG_MODEL_NAME:-}
 
-# JIT_CKPT=${JIT_CKPT:-/data/huilin/projects/JiT/run/train/h16_refiner_c1/h16_refiner_higher_than_c1/16}
+# JIT_CKPT=${JIT_CKPT:-/data/huilin/projects/JiT/run/train/focus_2scene_msdt_refiner_h_1xA100_48g/h16_refiner_c1/16}
 JIT_CKPT=${JIT_CKPT:-/data/huilin/projects/JiT/run/train/focus_2scene_msdt_refiner_h_1xA100_48g/h16_refiner_higher_than_c1/16}
 JIT_CKPT_TYPE=${JIT_CKPT_TYPE:-last}
 STATE_KEY=${STATE_KEY:-model_ema1}
