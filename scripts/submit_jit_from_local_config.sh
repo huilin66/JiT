@@ -15,14 +15,33 @@ CONFIG_CSV=${CONFIG_CSV:-}
 CONFIG_ROW=${CONFIG_ROW:-}
 CONFIG_MODEL_NAME=${CONFIG_MODEL_NAME:-}
 
+SCENE_MODE=${SCENE_MODE:-dn_blur4} # blur2, dn_blur4, or custom
+case "${SCENE_MODE}" in
+  blur2)
+    DEFAULT_JIT_CKPT="run/train/ablation_b16_manual_blur_scene_no_head_3x3090/b16_blur_2scene_no_head/16"
+    DEFAULT_SCENE_CKPT="run/scene_convnext_blur_2scene/checkpoint-best.pth"
+    ;;
+  dn_blur4)
+    DEFAULT_JIT_CKPT="run/train/ablation_b16_manual_blur_scene_no_head_3x3090/b16_dn_blur_4scene_no_head/16"
+    DEFAULT_SCENE_CKPT="run/scene_convnext_dn_blur_4scene/checkpoint-best.pth"
+    ;;
+  custom)
+    DEFAULT_JIT_CKPT="run/ablation_b16_3x3090/b16_dn_blur_4scene_no_head"
+    DEFAULT_SCENE_CKPT="run/scene_convnext_dn_blur_4scene/checkpoint-best.pth"
+    ;;
+  *)
+    echo "SCENE_MODE must be blur2, dn_blur4, or custom; got: ${SCENE_MODE}" >&2
+    exit 2
+    ;;
+esac
 
-JIT_CKPT=${JIT_CKPT:-run/ablation_b16_3x3090/b16_dn_blur_4scene_no_head}
+JIT_CKPT=${JIT_CKPT:-${DEFAULT_JIT_CKPT}}
 JIT_CKPT_TYPE=${JIT_CKPT_TYPE:-last}
 STATE_KEY=${STATE_KEY:-model_ema1}
 STEPS=${STEPS:-1}
 STRIDE=${STRIDE:-16}
 
-SCENE_CKPT=${SCENE_CKPT:-run/scene_convnext_dn_blur_4scene/checkpoint-best.pth}
+SCENE_CKPT=${SCENE_CKPT:-${DEFAULT_SCENE_CKPT}}
 SCENE_JSON=${SCENE_JSON:-}
 SCENE_BATCH_SIZE=${SCENE_BATCH_SIZE:-8}
 SCENE_NUM_WORKERS=${SCENE_NUM_WORKERS:-8}
@@ -131,6 +150,7 @@ fi
 
 echo "============================================================"
 echo "[Submit JiT] ${MODEL_NAME}"
+echo "scene_mode=${SCENE_MODE}"
 echo "input_dir=${INPUT_DIR}"
 echo "checkpoint=${JIT_CKPT}"
 echo "ckpt_type=${JIT_CKPT_TYPE}"
@@ -144,6 +164,7 @@ echo "tta_rot180=${TTA_ROT180}"
 echo "tta_rot270=${TTA_ROT270}"
 echo "scales=${SCALES}"
 echo "scene_json=${SCENE_JSON:-<predict with SCENE_CKPT>}"
+echo "scene_ckpt=${SCENE_CKPT}"
 echo "output_root=${OUTPUT_ROOT}"
 echo "============================================================"
 
