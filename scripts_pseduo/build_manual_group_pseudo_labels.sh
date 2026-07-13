@@ -8,7 +8,7 @@ set -euo pipefail
 #   DATA_ROOT=/root/huilin/data/eccv_dn \
 #   DROP_PRED_DIR=/root/huilin/data/eccv_dn/jit_submit_best_model_ema1_s1_r16_hflip_rot90_best_20260708_101616 \
 #   TEST_PRED_DIR=/root/huilin/data/eccv_dn/jit_submit_best_model_ema1_s1_r16_hflip_rot90_best_20260710_151811 \
-#   bash scripts/build_manual_group_pseudo_labels.sh
+#   bash scripts_pseduo/build_manual_group_pseudo_labels.sh
 
 ROOT_DIR=${ROOT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}
 DATA_ROOT=${DATA_ROOT:-/root/huilin/data/eccv_dn}
