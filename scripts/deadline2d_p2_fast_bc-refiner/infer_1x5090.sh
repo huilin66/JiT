@@ -12,7 +12,7 @@ if [[ -z "${INPUT_DIR}" ]]; then
   [[ -s "${JIT_B_CKPT}" ]] || { echo "Missing JiT-B checkpoint: ${JIT_B_CKPT}" >&2; exit 2; }
   CUDA_VISIBLE_DEVICES="${GPU}" DATA_ROOT="${DATA_ROOT}" INPUT_DIR="${TEST_INPUT_DIR}" OUTPUT_ROOT="${BASE_OUTPUT_ROOT}" \
     JIT_CKPT="${JIT_B_CKPT}" JIT_CKPT_TYPE=last STATE_KEY="${JIT_STATE_KEY}" SCENE_JSON="${SCENE_JSON}" \
-    MODEL_NAME=p2_jit_b_base STEPS=1 STRIDE=16 TTA_HFLIP=1 TTA_ROT90=1 TILE_BATCH_SIZE=32 \
+    MODEL_NAME=p2_jit_b_base STEPS=1 STRIDE=16 TTA_HFLIP=1 TTA_ROT90=1 TILE_BATCH_SIZE=64 \
     bash "${ROOT}/scripts/submit_jit_from_local_config.sh"
   shopt -s nullglob; candidates=("${BASE_OUTPUT_ROOT}/p2_jit_b_base_last_"*); shopt -u nullglob; dirs=()
   for candidate in "${candidates[@]}"; do [[ -d "${candidate}" ]] && dirs+=("${candidate}"); done
