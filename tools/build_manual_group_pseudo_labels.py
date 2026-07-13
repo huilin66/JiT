@@ -41,7 +41,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--test-pred-dir", default=DEFAULT_TEST_PRED_DIR, help="Flat test prediction directory.")
     parser.add_argument("--manual-pair-dir", default="demo/test_pari_manual")
     parser.add_argument("--output-root", default="demo/manual_group_pseudo")
+    parser.add_argument("--pseudo-input-dir", default="", help="Defaults to <output-root>/pseudo_inputs.")
+    parser.add_argument(
+        "--pseudo-label-image-dir",
+        default="",
+        help="Defaults to <output-root>/pseudo_labels_image. Stores source test images for pseudo labels.",
+    )
     parser.add_argument("--pseudo-label-dir", default="", help="Defaults to <output-root>/pseudo_labels.")
+    parser.add_argument(
+        "--pseudo-label-compare-dir",
+        default="",
+        help="Defaults to <output-root>/pseudo_labels_image_compare. Stores left=input, right=pseudo-label previews.",
+    )
     parser.add_argument(
         "--dataset-root",
         default="",
@@ -453,6 +464,55 @@ def copy_or_resize_pseudo_labels(
             pred_image.save(dst)
 
 
+def copy_pseudo_inputs(
+    mapping: dict[str, dict[str, object]],
+    test_input_dir: Path,
+    pseudo_input_dir: Path,
+    overwrite: bool,
+) -> None:
+    reset_dir(pseudo_input_dir, overwrite)
+    missing: list[Path] = []
+    for test_name in tqdm(sorted(mapping), desc="Pseudo inputs", unit="img"):
+        src = test_input_dir / test_name
+        if not src.exists():
+            missing.append(src)
+            continue
+        shutil.copy2(src, pseudo_input_dir / test_name)
+    raise_missing_paths("Missing test input files for pseudo_inputs", missing)
+
+
+def build_pseudo_label_compares(
+    mapping: dict[str, dict[str, object]],
+    image_dir: Path,
+    pseudo_label_dir: Path,
+    compare_dir: Path,
+    overwrite: bool,
+) -> None:
+    reset_dir(compare_dir, overwrite)
+    missing: list[Path] = []
+    for test_name in tqdm(sorted(mapping), desc="Pseudo input/label compares", unit="img"):
+        image_path = image_dir / test_name
+        label_path = pseudo_label_dir / test_name
+        if not image_path.exists():
+            missing.append(image_path)
+        if not label_path.exists():
+            missing.append(label_path)
+        if not image_path.exists() or not label_path.exists():
+            continue
+
+        with Image.open(image_path) as image:
+            image = image.convert("RGB")
+            with Image.open(label_path) as label:
+                label = label.convert("RGB")
+                if label.size != image.size:
+                    label = label.resize(image.size, Image.Resampling.BICUBIC)
+                canvas = Image.new("RGB", (image.width + label.width, image.height))
+                canvas.paste(image, (0, 0))
+                canvas.paste(label, (image.width, 0))
+                canvas.save(compare_dir / test_name)
+    raise_missing_paths("Missing files needed for pseudo label compare images", missing)
+
+
 def resolve_rain_train_dir(args: argparse.Namespace) -> Path | None:
     if args.rain_train_dir:
         return Path(args.rain_train_dir)
@@ -641,12 +701,45 @@ def main() -> None:
         include_target_test_groups=not args.no_include_target_test_groups,
     )
 
+    pseudo_input_dir = Path(args.pseudo_input_dir) if args.pseudo_input_dir else output_root / "pseudo_inputs"
+    copy_pseudo_inputs(
+        image_mapping,
+        Path(args.test_input_dir),
+        pseudo_input_dir,
+        overwrite=args.overwrite,
+    )
+
+    pseudo_label_image_dir = (
+        Path(args.pseudo_label_image_dir)
+        if args.pseudo_label_image_dir
+        else output_root / "pseudo_labels_image"
+    )
+    copy_pseudo_inputs(
+        image_mapping,
+        Path(args.test_input_dir),
+        pseudo_label_image_dir,
+        overwrite=args.overwrite,
+    )
+
     pseudo_label_dir = Path(args.pseudo_label_dir) if args.pseudo_label_dir else output_root / "pseudo_labels"
     copy_or_resize_pseudo_labels(
         image_mapping,
         Path(args.test_input_dir),
         pseudo_label_dir,
         resize_to_test=not args.no_resize_pseudo,
+        overwrite=args.overwrite,
+    )
+
+    pseudo_label_compare_dir = (
+        Path(args.pseudo_label_compare_dir)
+        if args.pseudo_label_compare_dir
+        else output_root / "pseudo_labels_image_compare"
+    )
+    build_pseudo_label_compares(
+        image_mapping,
+        pseudo_label_image_dir,
+        pseudo_label_dir,
+        pseudo_label_compare_dir,
         overwrite=args.overwrite,
     )
 
@@ -703,7 +796,10 @@ def main() -> None:
         "test_pred_dir": args.test_pred_dir,
         "manual_pair_dir": args.manual_pair_dir,
         "output_root": str(output_root.resolve()),
+        "pseudo_input_dir": str(pseudo_input_dir.resolve()),
+        "pseudo_label_image_dir": str(pseudo_label_image_dir.resolve()),
         "pseudo_label_dir": str(pseudo_label_dir.resolve()),
+        "pseudo_label_compare_dir": str(pseudo_label_compare_dir.resolve()),
         "drop_groups": len(drop_mapping),
         "test_groups": len(test_mapping),
         "mapped_test_images": len(image_mapping),

@@ -20,7 +20,10 @@ TEST_PRED_DIR=${TEST_PRED_DIR:-D:/zhl/project/JiT/submissions/ensemble_submit/su
 
 MANUAL_PAIR_DIR=${MANUAL_PAIR_DIR:-${ROOT_DIR}/demo/test_pari_manual}
 OUTPUT_ROOT=${OUTPUT_ROOT:-${ROOT_DIR}/demo/manual_group_pseudo}
+PSEUDO_INPUT_DIR=${PSEUDO_INPUT_DIR:-}
+PSEUDO_LABEL_IMAGE_DIR=${PSEUDO_LABEL_IMAGE_DIR:-}
 PSEUDO_LABEL_DIR=${PSEUDO_LABEL_DIR:-}
+PSEUDO_LABEL_COMPARE_DIR=${PSEUDO_LABEL_COMPARE_DIR:-}
 
 RAIN_TRAIN_DIR=${RAIN_TRAIN_DIR:-${DATA_ROOT}/RainDrop_Train}
 FOCUS2SCENE_JSON=${FOCUS2SCENE_JSON:-${RAIN_TRAIN_DIR}/Drop_focus_2scene.json}
@@ -113,6 +116,15 @@ args=(
 
 if [[ -n "${PSEUDO_LABEL_DIR}" ]]; then
   args+=(--pseudo-label-dir "${PSEUDO_LABEL_DIR}")
+fi
+if [[ -n "${PSEUDO_INPUT_DIR}" ]]; then
+  args+=(--pseudo-input-dir "${PSEUDO_INPUT_DIR}")
+fi
+if [[ -n "${PSEUDO_LABEL_IMAGE_DIR}" ]]; then
+  args+=(--pseudo-label-image-dir "${PSEUDO_LABEL_IMAGE_DIR}")
+fi
+if [[ -n "${PSEUDO_LABEL_COMPARE_DIR}" ]]; then
+  args+=(--pseudo-label-compare-dir "${PSEUDO_LABEL_COMPARE_DIR}")
 fi
 if [[ -n "${DROP_GROUPS_CSV}" ]]; then
   args+=(--drop-groups-csv "${DROP_GROUPS_CSV}")
