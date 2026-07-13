@@ -12,11 +12,12 @@ set -euo pipefail
 
 ROOT_DIR=${ROOT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}
 DATA_ROOT=${DATA_ROOT:-D:/zhl/data/eccv_dn}
+# DATA_ROOT=${DATA_ROOT:-/root/huilin/data/eccv_dn}
 
 DROP_INPUT_DIR=${DROP_INPUT_DIR:-${DATA_ROOT}/Drop}
 TEST_INPUT_DIR=${TEST_INPUT_DIR:-${DATA_ROOT}/test-input}
-DROP_PRED_DIR=${DROP_PRED_DIR:-D:/zhl/project/JiT/submissions/ensemble_submit/submission_ensemble_w0p45__0p55_20260708_001359}
-TEST_PRED_DIR=${TEST_PRED_DIR:-D:/zhl/project/JiT/submissions/ensemble_submit/submission_ensemble_uniform_20260710_000724}
+DROP_PRED_DIR=${DROP_PRED_DIR:-demo/ensemble_submit/submission_ensemble_w0p45__0p55_20260708_001359}
+TEST_PRED_DIR=${TEST_PRED_DIR:-demo/ensemble_submit/submission_ensemble_uniform_20260710_000724}
 
 MANUAL_PAIR_DIR=${MANUAL_PAIR_DIR:-${ROOT_DIR}/demo/test_pari_manual}
 OUTPUT_ROOT=${OUTPUT_ROOT:-${ROOT_DIR}/demo/manual_group_pseudo}
