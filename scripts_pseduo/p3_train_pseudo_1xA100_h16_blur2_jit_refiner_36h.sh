@@ -2,14 +2,15 @@
 set -euo pipefail
 
 # 1xA100 experiment:
-# Stage 1: fine-tune JiT-H/16 from the best focus-2scene H16 checkpoint to
-#          blur_2scene on pseudo-augmented data.
-# Stage 2: train a frozen-JiT MSDT refiner from the Stage-1 checkpoint.
+# Stage 1: lightly fine-tune JiT-H/16 from the best focus-2scene H16-refiner
+#          checkpoint to blur_2scene on pseudo-augmented data.
+# Stage 2: spend most of the budget training a frozen-JiT MSDT refiner from the
+#          Stage-1 checkpoint.
 #
 # Timing target from prior runs:
-#   H16 JIT:     50 epochs ~= 6.5h  -> 200 epochs ~= 26h
-#   H16 refiner: 50 epochs ~= 3.5h  -> 140 epochs ~= 9.8h
-# Total default target: about 36h.
+#   H16 JIT:     50 epochs ~= 6.5h
+#   H16 refiner: 50 epochs ~= 3.5h  -> 330 epochs ~= 23.1h
+# Total default target: about 30h.
 
 export TORCHDYNAMO_DISABLE=1
 export USE_LIBUV=0
@@ -26,15 +27,15 @@ DATA_ROOT=${DATA_ROOT:-/data/huilin/scrinvme/huilin/tp/eccv_dn}
 DATA_PATH=${DATA_PATH:-${DATA_ROOT}/RainDrop_Train}
 VAL_DATA_PATH=${VAL_DATA_PATH:-${DATA_PATH}}
 
-CKPT_H_FOCUS=${CKPT_H_FOCUS:-run/lh16/h16_rtx6000/checkpoint-best.pth}
-JIT_OUTPUT_DIR=${JIT_OUTPUT_DIR:-run/train_pseudo/h16_blur_2scene_jit_finetune_200ep_1xA100/16}
-REFINER_OUTPUT_DIR=${REFINER_OUTPUT_DIR:-run/train_pseudo/h16_blur_2scene_refiner_c1_140ep_1xA100/16}
+CKPT_H_FOCUS=${CKPT_H_FOCUS:-run/train/focus_2scene_msdt_refiner_h_1xA100_48g/h16_refiner_higher_than_c1/16}
+JIT_OUTPUT_DIR=${JIT_OUTPUT_DIR:-run/train_pseudo/h16_blur_2scene_from_refiner_higher_jit_ft_50ep_1xA100/16}
+REFINER_OUTPUT_DIR=${REFINER_OUTPUT_DIR:-run/train_pseudo/h16_blur_2scene_from_refiner_higher_refiner_330ep_1xA100/16}
 CKPT_H_BLUR=${CKPT_H_BLUR:-${JIT_OUTPUT_DIR}}
 SCENE_BLUR_2_PATH=${SCENE_BLUR_2_PATH:-${DATA_PATH}/Drop_blur_2scene_test_pseudo.json}
 
 IMG_SIZE=${IMG_SIZE:-256}
-EPOCHS_JIT=${EPOCHS_JIT:-200}
-EPOCHS_REFINER=${EPOCHS_REFINER:-140}
+EPOCHS_JIT=${EPOCHS_JIT:-50}
+EPOCHS_REFINER=${EPOCHS_REFINER:-330}
 WARMUP_EPOCHS=${WARMUP_EPOCHS:-5}
 EVAL_EPOCH=${EVAL_EPOCH:-5}
 EVAL_NUM_IMAGES=${EVAL_NUM_IMAGES:-100}
