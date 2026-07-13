@@ -3,8 +3,8 @@ set -euo pipefail
 
 # Generate official-test JiT submission from a selected local sweep config.
 # No Clear folder and no local evaluation are used here.
-
-DATA_ROOT=${DATA_ROOT:-D:/zhl/data/eccv_dn}
+# DATA_ROOT=${DATA_ROOT:-D:/zhl/data/eccv_dn}
+DATA_ROOT=${DATA_ROOT:-/data/huilin/scrinvme/huilin/tp/eccv_dn}
 INPUT_DIR=${INPUT_DIR:-${DATA_ROOT}/test-input}
 OUTPUT_ROOT=${OUTPUT_ROOT:-submissions_test}
 HISTORY_CSV=${HISTORY_CSV:-${OUTPUT_ROOT}/submission_history.csv}
@@ -15,35 +15,18 @@ CONFIG_CSV=${CONFIG_CSV:-}
 CONFIG_ROW=${CONFIG_ROW:-}
 CONFIG_MODEL_NAME=${CONFIG_MODEL_NAME:-}
 
-SCENE_MODE=${SCENE_MODE:-dn_blur4} # blur2, dn_blur4, or custom
-case "${SCENE_MODE}" in
-  blur2)
-    DEFAULT_JIT_CKPT="run/train/ablation_b16_manual_blur_scene_no_head_3x3090/b16_blur_2scene_no_head/16"
-    DEFAULT_SCENE_CKPT="run/scene_convnext_blur_2scene/checkpoint-best.pth"
-    ;;
-  dn_blur4)
-    DEFAULT_JIT_CKPT="run/train/ablation_b16_manual_blur_scene_no_head_3x3090/b16_dn_blur_4scene_no_head/16"
-    DEFAULT_SCENE_CKPT="run/scene_convnext_dn_blur_4scene/checkpoint-best.pth"
-    ;;
-  custom)
-    DEFAULT_JIT_CKPT="run/ablation_b16_3x3090/b16_dn_blur_4scene_no_head"
-    DEFAULT_SCENE_CKPT="run/scene_convnext_dn_blur_4scene/checkpoint-best.pth"
-    ;;
-  *)
-    echo "SCENE_MODE must be blur2, dn_blur4, or custom; got: ${SCENE_MODE}" >&2
-    exit 2
-    ;;
-esac
-
-JIT_CKPT=${JIT_CKPT:-${DEFAULT_JIT_CKPT}}
+# JIT_CKPT=${JIT_CKPT:-/data/huilin/projects/JiT/run/train/h16_refiner_c1/h16_refiner_higher_than_c1/16}
+JIT_CKPT=${JIT_CKPT:-/data/huilin/projects/JiT/run/train/focus_2scene_msdt_refiner_h_1xA100_48g/h16_refiner_higher_than_c1/16}
 JIT_CKPT_TYPE=${JIT_CKPT_TYPE:-last}
 STATE_KEY=${STATE_KEY:-model_ema1}
 STEPS=${STEPS:-1}
-STRIDE=${STRIDE:-16}
+STRIDE=${STRIDE:-32}
+TILE_BATCH_SIZE=${TILE_BATCH_SIZE:-128}
 
-SCENE_CKPT=${SCENE_CKPT:-${DEFAULT_SCENE_CKPT}}
+
+SCENE_CKPT=${SCENE_CKPT:-run/scene_convnext_focus_2scene_v1/checkpoint-best.pth}
 SCENE_JSON=${SCENE_JSON:-}
-SCENE_BATCH_SIZE=${SCENE_BATCH_SIZE:-8}
+SCENE_BATCH_SIZE=${SCENE_BATCH_SIZE:-512}
 SCENE_NUM_WORKERS=${SCENE_NUM_WORKERS:-8}
 
 MODEL_NAME=${MODEL_NAME:-}
@@ -52,7 +35,7 @@ EXPLICIT_MODEL_NAME=0
 if [[ -n "${MODEL_NAME}" ]]; then
   EXPLICIT_MODEL_NAME=1
 fi
-TILE_BATCH_SIZE=${TILE_BATCH_SIZE:-8}
+
 DEVICE=${DEVICE:-cuda:0}
 AMP_DTYPE=${AMP_DTYPE:-auto}
 TTA_HFLIP=${TTA_HFLIP:-1}
@@ -150,7 +133,6 @@ fi
 
 echo "============================================================"
 echo "[Submit JiT] ${MODEL_NAME}"
-echo "scene_mode=${SCENE_MODE}"
 echo "input_dir=${INPUT_DIR}"
 echo "checkpoint=${JIT_CKPT}"
 echo "ckpt_type=${JIT_CKPT_TYPE}"
