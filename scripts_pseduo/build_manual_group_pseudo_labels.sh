@@ -13,6 +13,7 @@ set -euo pipefail
 ROOT_DIR=${ROOT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}
 DATA_ROOT=${DATA_ROOT:-D:/zhl/data/eccv_dn}
 # DATA_ROOT=${DATA_ROOT:-/root/huilin/data/eccv_dn}
+# DATA_ROOT=${DATA_ROOT:-/data/huilin/scrinvme/huilin/tp/eccv_dn}
 
 DROP_INPUT_DIR=${DROP_INPUT_DIR:-${DATA_ROOT}/Drop}
 TEST_INPUT_DIR=${TEST_INPUT_DIR:-${DATA_ROOT}/test-input}
