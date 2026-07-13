@@ -24,7 +24,7 @@ export PYTORCH_ALLOC_CONF=${PYTORCH_ALLOC_CONF:-max_split_size_mb:128}
 GPU=${GPU:-0}
 RUN_PLANS=${RUN_PLANS:-"SAFE MID HIGH"}
 ROOT_DIR=${ROOT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}
-DATA_ROOT=${DATA_ROOT:-/root/huilin/data/eccv_dn}
+DATA_ROOT=${DATA_ROOT:-D:/zhl/data/eccv_dn}
 DATA_PATH=${DATA_PATH:-${DATA_ROOT}/RainDrop_Train}
 VAL_DATA_PATH=${VAL_DATA_PATH:-${DATA_PATH}}
 
