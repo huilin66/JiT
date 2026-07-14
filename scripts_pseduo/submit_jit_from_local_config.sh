@@ -38,6 +38,12 @@ fi
 
 DEVICE=${DEVICE:-cuda:0}
 AMP_DTYPE=${AMP_DTYPE:-auto}
+TTA_HFLIP=${TTA_HFLIP:-1}
+TTA_VFLIP=${TTA_VFLIP:-0}
+TTA_ROT90=${TTA_ROT90:-1}
+TTA_ROT180=${TTA_ROT180:-0}
+TTA_ROT270=${TTA_ROT270:-0}
+SCALES=${SCALES:-1.0}
 NOTES=${NOTES:-submit_from_local_config}
 REMOVE_IMAGES_AFTER_ZIP=${REMOVE_IMAGES_AFTER_ZIP:-0}
 
@@ -78,6 +84,23 @@ if [[ -z "${MODEL_NAME}" ]]; then
   MODEL_NAME="${MODEL_NAME_PREFIX}_${ckpt_tag}_${state_tag}_s${STEPS}_r${STRIDE}"
 fi
 
+tta_args=()
+if [[ "${TTA_HFLIP}" == "1" ]]; then
+  tta_args+=(--tta-hflip)
+fi
+if [[ "${TTA_VFLIP}" == "1" ]]; then
+  tta_args+=(--tta-vflip)
+fi
+if [[ "${TTA_ROT90}" == "1" ]]; then
+  tta_args+=(--tta-rot90)
+fi
+if [[ "${TTA_ROT180}" == "1" ]]; then
+  tta_args+=(--tta-rot180)
+fi
+if [[ "${TTA_ROT270}" == "1" ]]; then
+  tta_args+=(--tta-rot270)
+fi
+
 scene_args=()
 if [[ -n "${SCENE_JSON}" ]]; then
   scene_args+=(--scene-json "${SCENE_JSON}")
@@ -107,7 +130,12 @@ echo "ckpt_type=${JIT_CKPT_TYPE}"
 echo "state_key=${STATE_KEY}"
 echo "steps=${STEPS}"
 echo "stride=${STRIDE}"
-echo "aug_infer=0"
+echo "tta_hflip=${TTA_HFLIP}"
+echo "tta_vflip=${TTA_VFLIP}"
+echo "tta_rot90=${TTA_ROT90}"
+echo "tta_rot180=${TTA_ROT180}"
+echo "tta_rot270=${TTA_ROT270}"
+echo "scales=${SCALES}"
 echo "scene_json=${SCENE_JSON:-<predict with SCENE_CKPT>}"
 echo "scene_ckpt=${SCENE_CKPT}"
 echo "output_root=${OUTPUT_ROOT}"
@@ -126,9 +154,11 @@ python submit_jit.py \
   --steps "${STEPS}" \
   --stride "${STRIDE}" \
   --tile-batch-size "${TILE_BATCH_SIZE}" \
+  "${tta_args[@]}" \
+  --scales "${SCALES}" \
   --device "${DEVICE}" \
   --amp-dtype "${AMP_DTYPE}" \
-  --notes "${NOTES}; ckpt_type=${JIT_CKPT_TYPE}; state_key=${STATE_KEY}; steps=${STEPS}; stride=${STRIDE}; aug_infer=0" \
+  --notes "${NOTES}; ckpt_type=${JIT_CKPT_TYPE}; state_key=${STATE_KEY}; steps=${STEPS}; stride=${STRIDE}; tta_hflip=${TTA_HFLIP}; tta_vflip=${TTA_VFLIP}; tta_rot90=${TTA_ROT90}; tta_rot180=${TTA_ROT180}; tta_rot270=${TTA_ROT270}; scales=${SCALES}" \
   "${remove_args[@]}"
 
 echo "Submission prediction finished: ${OUTPUT_ROOT}"
