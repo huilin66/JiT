@@ -16,12 +16,12 @@ CONFIG_ROW=${CONFIG_ROW:-}
 CONFIG_MODEL_NAME=${CONFIG_MODEL_NAME:-}
 
 # JIT_CKPT=${JIT_CKPT:-/data/huilin/projects/JiT/run/train/focus_2scene_msdt_refiner_h_1xA100_48g/h16_refiner_c1/16}
-JIT_CKPT=${JIT_CKPT:-run/p2_b16_dn_blur_4scene_jit_best_base_hparams_3x3090}
+JIT_CKPT=${JIT_CKPT:-run/p2_b16_dn_blur_4scene_refiner_c1_from_jit_last_3x3090}
 JIT_CKPT_TYPE=${JIT_CKPT_TYPE:-last}
 STATE_KEY=${STATE_KEY:-model_ema1}
 STEPS=${STEPS:-1}
 STRIDE=${STRIDE:-32}
-TILE_BATCH_SIZE=${TILE_BATCH_SIZE:-128}
+TILE_BATCH_SIZE=${TILE_BATCH_SIZE:-8}
 
 
 SCENE_CKPT=${SCENE_CKPT:-run/scene_convnext_focus_2scene_v1/checkpoint-best.pth}
