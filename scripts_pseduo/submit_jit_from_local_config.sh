@@ -3,8 +3,8 @@ set -euo pipefail
 
 # Generate official-test JiT submission from a selected local sweep config.
 # No Clear folder and no local evaluation are used here.
-# DATA_ROOT=${DATA_ROOT:-D:/zhl/data/eccv_dn}
-DATA_ROOT=${DATA_ROOT:-E:/cp_dir/eccv_dn}
+DATA_ROOT=${DATA_ROOT:-D:/zhl/data/eccv_dn}
+# DATA_ROOT=${DATA_ROOT:-E:/cp_dir/eccv_dn}
 INPUT_DIR=${INPUT_DIR:-${DATA_ROOT}/test-input}
 OUTPUT_ROOT=${OUTPUT_ROOT:-submissions_test}
 HISTORY_CSV=${HISTORY_CSV:-${OUTPUT_ROOT}/submission_history.csv}
@@ -16,17 +16,17 @@ CONFIG_ROW=${CONFIG_ROW:-}
 CONFIG_MODEL_NAME=${CONFIG_MODEL_NAME:-}
 
 # JIT_CKPT=${JIT_CKPT:-/data/huilin/projects/JiT/run/train/focus_2scene_msdt_refiner_h_1xA100_48g/h16_refiner_c1/16}
-JIT_CKPT=${JIT_CKPT:-run/p2_b16_dn_blur_4scene_refiner_c1_from_jit_last_3x3090}
+JIT_CKPT=${JIT_CKPT:-run/train_pseudo/p4_b16_focus_2scene_from_best_refiner_jit_ft_100ep_3x3090}
 JIT_CKPT_TYPE=${JIT_CKPT_TYPE:-last}
 STATE_KEY=${STATE_KEY:-model_ema1}
 STEPS=${STEPS:-1}
-STRIDE=${STRIDE:-32}
+STRIDE=${STRIDE:-16}
 TILE_BATCH_SIZE=${TILE_BATCH_SIZE:-8}
 
 
 SCENE_CKPT=${SCENE_CKPT:-run/scene_convnext_focus_2scene_v1/checkpoint-best.pth}
 SCENE_JSON=${SCENE_JSON:-}
-SCENE_BATCH_SIZE=${SCENE_BATCH_SIZE:-512}
+SCENE_BATCH_SIZE=${SCENE_BATCH_SIZE:-8}
 SCENE_NUM_WORKERS=${SCENE_NUM_WORKERS:-8}
 
 MODEL_NAME=${MODEL_NAME:-}
