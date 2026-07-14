@@ -6,6 +6,7 @@ demo/
 ckpt/
 run/
 submissions/
+submissions_test/
 
 *.zip
 *.pth
