@@ -3,8 +3,8 @@ set -euo pipefail
 
 # Generate official-test JiT submission from a selected local sweep config.
 # No Clear folder and no local evaluation are used here.
-DATA_ROOT=${DATA_ROOT:-D:/zhl/data/eccv_dn}
-# DATA_ROOT=${DATA_ROOT:-E:/cp_dir/eccv_dn}
+# DATA_ROOT=${DATA_ROOT:-D:/zhl/data/eccv_dn}
+DATA_ROOT=${DATA_ROOT:-E:/cp_dir/eccv_dn}
 INPUT_DIR=${INPUT_DIR:-${DATA_ROOT}/test-input}
 OUTPUT_ROOT=${OUTPUT_ROOT:-submissions_test}
 HISTORY_CSV=${HISTORY_CSV:-${OUTPUT_ROOT}/submission_history.csv}
@@ -16,7 +16,7 @@ CONFIG_ROW=${CONFIG_ROW:-}
 CONFIG_MODEL_NAME=${CONFIG_MODEL_NAME:-}
 
 # JIT_CKPT=${JIT_CKPT:-/data/huilin/projects/JiT/run/train/focus_2scene_msdt_refiner_h_1xA100_48g/h16_refiner_c1/16}
-JIT_CKPT=${JIT_CKPT:-run/train_pseudo/p4_b16_focus_2scene_from_best_refiner_jit_ft_100ep_3x3090}
+JIT_CKPT=${JIT_CKPT:-run/h16_blur_2scene_from_refiner_higher_refiner_300ep_1xA100}
 JIT_CKPT_TYPE=${JIT_CKPT_TYPE:-last}
 STATE_KEY=${STATE_KEY:-model_ema1}
 STEPS=${STEPS:-1}
@@ -28,6 +28,10 @@ SCENE_CKPT=${SCENE_CKPT:-run/scene_convnext_focus_2scene_v1/checkpoint-best.pth}
 SCENE_JSON=${SCENE_JSON:-}
 SCENE_BATCH_SIZE=${SCENE_BATCH_SIZE:-8}
 SCENE_NUM_WORKERS=${SCENE_NUM_WORKERS:-8}
+UPDATE_SCENE_FROM_FOCUS_PSEUDO=${UPDATE_SCENE_FROM_FOCUS_PSEUDO:-0}
+FOCUS2SCENE_PSEUDO_JSON=${FOCUS2SCENE_PSEUDO_JSON:-${DATA_ROOT}/RainDrop_Train/Drop_focus_2scene_test_pseudo.json}
+FOCUS2SCENE_PSEUDO_PREFIX=${FOCUS2SCENE_PSEUDO_PREFIX:-test_pseudo_}
+REQUIRE_FOCUS2SCENE_PSEUDO_MATCH=${REQUIRE_FOCUS2SCENE_PSEUDO_MATCH:-1}
 
 MODEL_NAME=${MODEL_NAME:-}
 MODEL_NAME_PREFIX=${MODEL_NAME_PREFIX:-jit}
@@ -102,7 +106,53 @@ if [[ "${TTA_ROT270}" == "1" ]]; then
 fi
 
 scene_args=()
-if [[ -n "${SCENE_JSON}" ]]; then
+if [[ "${UPDATE_SCENE_FROM_FOCUS_PSEUDO}" == "1" ]]; then
+  if [[ ! -f "${FOCUS2SCENE_PSEUDO_JSON}" ]]; then
+    echo "Missing FOCUS2SCENE_PSEUDO_JSON: ${FOCUS2SCENE_PSEUDO_JSON}" >&2
+    exit 2
+  fi
+  scene_stamp=$(date +%Y%m%d_%H%M%S)
+  scene_dir="${OUTPUT_ROOT}/scene_predictions"
+  mkdir -p "${scene_dir}"
+
+  raw_scene_json="${SCENE_JSON}"
+  if [[ -z "${raw_scene_json}" ]]; then
+    raw_scene_json="${scene_dir}/${MODEL_NAME}_${scene_stamp}_raw.json"
+    raw_scene_csv="${scene_dir}/${MODEL_NAME}_${scene_stamp}_raw.csv"
+    echo "============================================================"
+    echo "[Scene pre-infer] ${raw_scene_json}"
+    echo "checkpoint=${SCENE_CKPT}"
+    echo "batch=${SCENE_BATCH_SIZE}, workers=${SCENE_NUM_WORKERS}"
+    echo "============================================================"
+    python -m scene_tools.infer_scene_convnext \
+      --input-dir "${INPUT_DIR}" \
+      --checkpoint "${SCENE_CKPT}" \
+      --output-json "${raw_scene_json}" \
+      --output-csv "${raw_scene_csv}" \
+      --batch-size "${SCENE_BATCH_SIZE}" \
+      --num-workers "${SCENE_NUM_WORKERS}" \
+      --device "${DEVICE}" \
+      --amp-dtype "${AMP_DTYPE}"
+  fi
+
+  updated_scene_json="${scene_dir}/${MODEL_NAME}_${scene_stamp}_focus_pseudo.json"
+  updated_scene_manifest="${scene_dir}/${MODEL_NAME}_${scene_stamp}_focus_pseudo_manifest.json"
+  update_scene_args=()
+  if [[ "${REQUIRE_FOCUS2SCENE_PSEUDO_MATCH}" == "1" ]]; then
+    update_scene_args+=(--require-any)
+  fi
+  python tools/update_scene_json_from_focus_pseudo.py \
+    --scene-json "${raw_scene_json}" \
+    --focus2scene-pseudo-json "${FOCUS2SCENE_PSEUDO_JSON}" \
+    --input-dir "${INPUT_DIR}" \
+    --output-json "${updated_scene_json}" \
+    --manifest-json "${updated_scene_manifest}" \
+    --prefix "${FOCUS2SCENE_PSEUDO_PREFIX}" \
+    "${update_scene_args[@]}"
+
+  SCENE_JSON="${updated_scene_json}"
+  scene_args+=(--scene-json "${SCENE_JSON}")
+elif [[ -n "${SCENE_JSON}" ]]; then
   scene_args+=(--scene-json "${SCENE_JSON}")
 else
   scene_stamp=$(date +%Y%m%d_%H%M%S)
@@ -136,6 +186,8 @@ echo "tta_rot90=${TTA_ROT90}"
 echo "tta_rot180=${TTA_ROT180}"
 echo "tta_rot270=${TTA_ROT270}"
 echo "scales=${SCALES}"
+echo "update_scene_from_focus_pseudo=${UPDATE_SCENE_FROM_FOCUS_PSEUDO}"
+echo "focus2scene_pseudo_json=${FOCUS2SCENE_PSEUDO_JSON}"
 echo "scene_json=${SCENE_JSON:-<predict with SCENE_CKPT>}"
 echo "scene_ckpt=${SCENE_CKPT}"
 echo "output_root=${OUTPUT_ROOT}"
@@ -158,7 +210,7 @@ python submit_jit.py \
   --scales "${SCALES}" \
   --device "${DEVICE}" \
   --amp-dtype "${AMP_DTYPE}" \
-  --notes "${NOTES}; ckpt_type=${JIT_CKPT_TYPE}; state_key=${STATE_KEY}; steps=${STEPS}; stride=${STRIDE}; tta_hflip=${TTA_HFLIP}; tta_vflip=${TTA_VFLIP}; tta_rot90=${TTA_ROT90}; tta_rot180=${TTA_ROT180}; tta_rot270=${TTA_ROT270}; scales=${SCALES}" \
+  --notes "${NOTES}; ckpt_type=${JIT_CKPT_TYPE}; state_key=${STATE_KEY}; steps=${STEPS}; stride=${STRIDE}; tta_hflip=${TTA_HFLIP}; tta_vflip=${TTA_VFLIP}; tta_rot90=${TTA_ROT90}; tta_rot180=${TTA_ROT180}; tta_rot270=${TTA_ROT270}; scales=${SCALES}; update_scene_from_focus_pseudo=${UPDATE_SCENE_FROM_FOCUS_PSEUDO}" \
   "${remove_args[@]}"
 
 echo "Submission prediction finished: ${OUTPUT_ROOT}"
