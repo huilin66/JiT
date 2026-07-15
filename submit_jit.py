@@ -74,6 +74,9 @@ def parse_args():
     parser.add_argument("--tta-rot180", action="store_true", help="Average original and 180-degree rotation inference.")
     parser.add_argument("--tta-rot270", action="store_true", help="Average original and 270-degree rotation inference.")
     parser.add_argument("--scales", default="1.0", help="Comma-separated multi-scale inference list, e.g. 1.0,0.875,1.125.")
+    parser.add_argument("--second-refiner", action="store_true", help="Apply detail_refiner a second time to the first restored result.")
+    parser.add_argument("--second-refiner-w1", type=float, default=0.0, help="Weight for first result y1 when --second-refiner is enabled.")
+    parser.add_argument("--second-refiner-w2", type=float, default=1.0, help="Weight for second-refined result y2 when --second-refiner is enabled.")
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--amp-dtype", default="auto", choices=["auto", "bf16", "fp16", "fp32"])
     parser.add_argument("--submission-info", default="readme.txt", help="Optional file added to ZIP; empty disables it")
@@ -240,7 +243,20 @@ def autocast_context(device, amp_dtype):
     return torch.autocast(device_type="cuda", dtype=dtype)
 
 
-def restore_tensor(model, tensor, device, patch_size, stride, tile_batch_size, steps, scene_id, amp_dtype):
+def restore_tensor(
+    model,
+    tensor,
+    device,
+    patch_size,
+    stride,
+    tile_batch_size,
+    steps,
+    scene_id,
+    amp_dtype,
+    second_refiner=False,
+    second_refiner_w1=0.0,
+    second_refiner_w2=1.0,
+):
     tensor, original_size = pad_to_patch(tensor, patch_size)
     _, _, height, width = tensor.shape
 
@@ -262,6 +278,11 @@ def restore_tensor(model, tensor, device, patch_size, stride, tile_batch_size, s
             labels = torch.full((patches.shape[0],), scene_id, dtype=torch.long, device=device)
         with autocast_context(device, amp_dtype):
             predictions = model.generate_i2i(patches, steps=steps, dummy_labels=labels)
+            if second_refiner:
+                if getattr(model, "detail_refiner", None) is None:
+                    raise RuntimeError("--second-refiner requires a checkpoint with detail_refiner weights")
+                refined_twice = model.detail_refiner(predictions, predictions)
+                predictions = second_refiner_w1 * predictions + second_refiner_w2 * refined_twice
         predictions = predictions.float().cpu()
         for index, (x, y) in enumerate(chunk_coords):
             output[:, :, y:y + patch_size, x:x + patch_size] += predictions[index:index + 1] * window
@@ -289,6 +310,9 @@ def restore_image(
     tta_rot180=False,
     tta_rot270=False,
     scales=None,
+    second_refiner=False,
+    second_refiner_w1=0.0,
+    second_refiner_w2=1.0,
 ):
     image = Image.open(image_path).convert("RGB")
     array = np.array(image, dtype=np.float32, copy=True)
@@ -334,6 +358,9 @@ def restore_image(
                 steps=steps,
                 scene_id=scene_id,
                 amp_dtype=amp_dtype,
+                second_refiner=second_refiner,
+                second_refiner_w1=second_refiner_w1,
+                second_refiner_w2=second_refiner_w2,
             )
             if inverse_dims:
                 if isinstance(inverse_dims, tuple):
@@ -481,6 +508,10 @@ def main():
         f"State: {state_key}; model: {architecture}; scene: {use_scene}; "
         f"head: {has_bg_subnet}; MSDT refiner: {has_detail_refiner}"
     )
+    print(
+        "Second refiner: "
+        f"{int(cli.second_refiner)}; w1={cli.second_refiner_w1}; w2={cli.second_refiner_w2}"
+    )
     print(f"Images: {len(image_files)}; device: {device}; output: {archive_path}")
     started = time.perf_counter()
     for image_path in tqdm(image_files, desc="JiT submission inference"):
@@ -501,6 +532,9 @@ def main():
             tta_rot180=cli.tta_rot180,
             tta_rot270=cli.tta_rot270,
             scales=scales,
+            second_refiner=cli.second_refiner,
+            second_refiner_w1=cli.second_refiner_w1,
+            second_refiner_w2=cli.second_refiner_w2,
         )
         prediction.save(image_dir / f"{image_path.stem}.png", format="PNG", optimize=True)
     runtime = time.perf_counter() - started
@@ -533,6 +567,9 @@ def main():
                 f"; tta_hflip={int(cli.tta_hflip)}; tta_vflip={int(cli.tta_vflip)}"
                 f"; tta_rot90={int(cli.tta_rot90)}; tta_rot180={int(cli.tta_rot180)}; tta_rot270={int(cli.tta_rot270)}"
                 f"; scales={','.join(str(scale) for scale in scales)}"
+                f"; second_refiner={int(cli.second_refiner)}"
+                f"; second_refiner_w1={cli.second_refiner_w1}"
+                f"; second_refiner_w2={cli.second_refiner_w2}"
                 + (f"; {cli.notes}" if cli.notes else "")
             ),
         },
