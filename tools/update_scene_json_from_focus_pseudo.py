@@ -103,6 +103,8 @@ def main() -> None:
         json.dump(updated, handle, indent=2, sort_keys=True)
         handle.write("\n")
 
+    old_counts = dict(sorted(Counter(labels[name] for name in image_names).items()))
+    new_counts = dict(sorted(Counter(updated[name] for name in image_names).items()))
     manifest = {
         "scene_json": str(scene_json),
         "focus2scene_pseudo_json": str(focus_json),
@@ -112,8 +114,8 @@ def main() -> None:
         "images": len(image_names),
         "updated": len(changes),
         "missing_pseudo": len(missing_pseudo),
-        "old_counts": dict(sorted(Counter(labels[name] for name in image_names).items())),
-        "new_counts": dict(sorted(Counter(updated[name] for name in image_names).items())),
+        "old_counts": old_counts,
+        "new_counts": new_counts,
         "changes": changes,
     }
     manifest_json.parent.mkdir(parents=True, exist_ok=True)
@@ -125,6 +127,8 @@ def main() -> None:
         "Updated scene labels from focus2scene pseudo: "
         f"{len(changes)}/{len(image_names)} images; missing_pseudo={len(missing_pseudo)}"
     )
+    print(f"Original class counts: {old_counts}")
+    print(f"Updated class counts: {new_counts}")
     print(f"Saved updated scene JSON: {output_json}")
     print(f"Saved update manifest: {manifest_json}")
 
