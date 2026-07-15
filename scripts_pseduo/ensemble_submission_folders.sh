@@ -16,9 +16,10 @@ set -euo pipefail
 
 OUTPUT_ROOT=${OUTPUT_ROOT:-submissions_test/ensemble_submit}
 MODEL_NAME=${MODEL_NAME:-submission_ensemble}
-INPUT_DIRS=${INPUT_DIRS:-submissions/ensemble_submit/submission_ensemble_uniform_20260710_000724,submissions_test/jit_submit_last_model_ema1_s1_r16_hflip_rot90_last_20260714_012011}
+# INPUT_DIRS=${INPUT_DIRS:-submissions_test/jit_l_e1_s1_r16_last_20260715_124201_group_closest_to_median_w1p0,submissions_test/jit_l_e1_s1_r16_last_20260715_134946_group_closest_to_median_w1p0,D:/zhl/project/MSDT/submissions/msdt_1x5090/msdt_no_scene_best_20260714_225746_group_closest_to_median_w1p0}
+INPUT_DIRS=${INPUT_DIRS:-submissions_test/jit_l_e1_s1_r16_last_20260715_124201,submissions_test/jit_l_e1_s1_r16_last_20260715_134946,D:/zhl/project/MSDT/submissions/msdt_1x5090/msdt_no_scene_best_20260714_225746}
 WEIGHTS=${WEIGHTS:-}
-WEIGHTS_LIST=${WEIGHTS_LIST:-0.4,0.6}
+WEIGHTS_LIST=${WEIGHTS_LIST:-}
 HISTORY_CSV=${HISTORY_CSV:-${OUTPUT_ROOT}/ensemble_history.csv}
 REMOVE_IMAGES_AFTER_ZIP=${REMOVE_IMAGES_AFTER_ZIP:-0}
 NOTES=${NOTES:-official_submission_folder_ensemble}

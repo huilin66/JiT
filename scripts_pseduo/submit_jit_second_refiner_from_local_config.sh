@@ -20,7 +20,7 @@ CONFIG_ROW=${CONFIG_ROW:-}
 CONFIG_MODEL_NAME=${CONFIG_MODEL_NAME:-}
 
 # JIT_CKPT=${JIT_CKPT:-/data/huilin/projects/JiT/run/train/focus_2scene_msdt_refiner_h_1xA100_48g/h16_refiner_c1/16}
-JIT_CKPT=${JIT_CKPT:-run/train_pseudo/p4_b16_focus_2scene_from_best_refiner_refiner_300ep_3x3090/checkpoint-last.pth}
+JIT_CKPT=${JIT_CKPT:-run/train_pseudo/p4_b16_focus_2scene_from_best_refiner_refiner_300ep_3x3090}
 JIT_CKPT_TYPE=${JIT_CKPT_TYPE:-last}
 STATE_KEY=${STATE_KEY:-model_ema1}
 STEPS=${STEPS:-1}
@@ -48,7 +48,7 @@ DEVICE=${DEVICE:-cuda:0}
 AMP_DTYPE=${AMP_DTYPE:-auto}
 TTA_HFLIP=${TTA_HFLIP:-1}
 TTA_VFLIP=${TTA_VFLIP:-0}
-TTA_ROT90=${TTA_ROT90:-1}
+TTA_ROT90=${TTA_ROT90:-0}
 TTA_ROT180=${TTA_ROT180:-0}
 TTA_ROT270=${TTA_ROT270:-0}
 SCALES=${SCALES:-1.0}

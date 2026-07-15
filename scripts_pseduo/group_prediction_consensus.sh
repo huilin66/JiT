@@ -9,9 +9,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${REPO_ROOT}"
 
-PRED_DIR=${PRED_DIR:-}
-TEST_GROUP_DIR=${TEST_GROUP_DIR:-demo/test_group}
-METHOD=${METHOD:-closest_to_median}
+# PRED_DIR=${PRED_DIR:-D:/zhl/project/MSDT/submissions/msdt_1x5090/msdt_no_scene_best_20260714_225746}
+# PRED_DIR=${PRED_DIR:-submissions_test/jit_l_e1_s1_r16_last_20260715_124201}
+# PRED_DIR=${PRED_DIR:-submissions_test/jit_l_e1_s1_r16_last_20260715_134946}
+PRED_DIR=${PRED_DIR:-submissions_test/ensemble_submit/submission_ensemble_uniform_20260715_153015}
+TEST_GROUP_DIR=${TEST_GROUP_DIR:-demo/manual_group_pseudo/test_group_pure}
+# closest_to_median: 32.3888
+# sharpest: 32.2588
+# 32.6659
+METHOD=${METHOD:-inverse_median_distance}
 TRIM_FRACTION=${TRIM_FRACTION:-0.2}
 GROUP_WEIGHT=${GROUP_WEIGHT:-1.0}
 MIN_GROUP_SIZE=${MIN_GROUP_SIZE:-2}
