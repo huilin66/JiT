@@ -9,6 +9,7 @@ INPUT_DIR=${INPUT_DIR:-${DATA_ROOT}/test-input}
 OUTPUT_ROOT=${OUTPUT_ROOT:-submissions_test}
 HISTORY_CSV=${HISTORY_CSV:-${OUTPUT_ROOT}/submission_history.csv}
 SWEEP_DIR=${SWEEP_DIR:-submissions/local_val_sweep}
+GPU=${GPU:-0}
 
 # CONFIG_CSV=${CONFIG_CSV:-${SWEEP_DIR}/local_val_sweep.csv}
 CONFIG_CSV=${CONFIG_CSV:-}
@@ -16,7 +17,7 @@ CONFIG_ROW=${CONFIG_ROW:-}
 CONFIG_MODEL_NAME=${CONFIG_MODEL_NAME:-}
 
 # JIT_CKPT=${JIT_CKPT:-/data/huilin/projects/JiT/run/train/focus_2scene_msdt_refiner_h_1xA100_48g/h16_refiner_c1/16}
-JIT_CKPT=${JIT_CKPT:-run/train_pseudo/p4_b16_focus_2scene_from_best_refiner_refiner_300ep_3x3090}
+JIT_CKPT=${JIT_CKPT:-run/train_pseudo/p4_b16_focus_2scene_from_best_refiner_refiner_300ep_single_gpu/16}
 JIT_CKPT_TYPE=${JIT_CKPT_TYPE:-last}
 STATE_KEY=${STATE_KEY:-model_ema1}
 STEPS=${STEPS:-1}
@@ -124,7 +125,7 @@ if [[ "${UPDATE_SCENE_FROM_FOCUS_PSEUDO}" == "1" ]]; then
     echo "checkpoint=${SCENE_CKPT}"
     echo "batch=${SCENE_BATCH_SIZE}, workers=${SCENE_NUM_WORKERS}"
     echo "============================================================"
-    python -m scene_tools.infer_scene_convnext \
+    CUDA_VISIBLE_DEVICES="${GPU}" python -m scene_tools.infer_scene_convnext \
       --input-dir "${INPUT_DIR}" \
       --checkpoint "${SCENE_CKPT}" \
       --output-json "${raw_scene_json}" \
@@ -176,6 +177,7 @@ echo "============================================================"
 echo "[Submit JiT] ${MODEL_NAME}"
 echo "input_dir=${INPUT_DIR}"
 echo "checkpoint=${JIT_CKPT}"
+echo "GPU=${GPU}"
 echo "ckpt_type=${JIT_CKPT_TYPE}"
 echo "state_key=${STATE_KEY}"
 echo "steps=${STEPS}"
@@ -193,7 +195,7 @@ echo "scene_ckpt=${SCENE_CKPT}"
 echo "output_root=${OUTPUT_ROOT}"
 echo "============================================================"
 
-python submit_jit.py \
+CUDA_VISIBLE_DEVICES="${GPU}" python submit_jit.py \
   --input-dir "${INPUT_DIR}" \
   --checkpoint "${JIT_CKPT}" \
   --ckpt_type "${JIT_CKPT_TYPE}" \

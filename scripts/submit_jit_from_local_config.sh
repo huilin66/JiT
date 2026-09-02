@@ -9,6 +9,7 @@ INPUT_DIR=${INPUT_DIR:-${DATA_ROOT}/test-input}
 OUTPUT_ROOT=${OUTPUT_ROOT:-submissions_test}
 HISTORY_CSV=${HISTORY_CSV:-${OUTPUT_ROOT}/submission_history.csv}
 SWEEP_DIR=${SWEEP_DIR:-submissions/local_val_sweep}
+GPU=${GPU:-0}
 
 # CONFIG_CSV=${CONFIG_CSV:-${SWEEP_DIR}/local_val_sweep.csv}
 CONFIG_CSV=${CONFIG_CSV:-}
@@ -135,6 +136,7 @@ echo "============================================================"
 echo "[Submit JiT] ${MODEL_NAME}"
 echo "input_dir=${INPUT_DIR}"
 echo "checkpoint=${JIT_CKPT}"
+echo "GPU=${GPU}"
 echo "ckpt_type=${JIT_CKPT_TYPE}"
 echo "state_key=${STATE_KEY}"
 echo "steps=${STEPS}"
@@ -150,7 +152,7 @@ echo "scene_ckpt=${SCENE_CKPT}"
 echo "output_root=${OUTPUT_ROOT}"
 echo "============================================================"
 
-python submit_jit.py \
+CUDA_VISIBLE_DEVICES="${GPU}" python submit_jit.py \
   --input-dir "${INPUT_DIR}" \
   --checkpoint "${JIT_CKPT}" \
   --ckpt_type "${JIT_CKPT_TYPE}" \

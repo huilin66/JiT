@@ -16,10 +16,7 @@ export TORCHDYNAMO_DISABLE=1
 export USE_LIBUV=0
 export PYTORCH_ALLOC_CONF=${PYTORCH_ALLOC_CONF:-max_split_size_mb:128}
 
-GPUS=${GPUS:-0}
-NPROC=${NPROC:-1}
-MASTER_PORT_JIT=${MASTER_PORT_JIT:-30720}
-MASTER_PORT_REFINER=${MASTER_PORT_REFINER:-30721}
+GPU=${GPU:-0}
 RUN_STAGES=${RUN_STAGES:-"JIT REFINER"}
 
 ROOT_DIR=${ROOT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}
@@ -44,6 +41,7 @@ NUM_SAMPLING_STEPS=${NUM_SAMPLING_STEPS:-1}
 SAVE_LAST_FREQ=${SAVE_LAST_FREQ:-5}
 LOG_FREQ=${LOG_FREQ:-50}
 ONLINE_EVAL=${ONLINE_EVAL:-1}
+MAX_TRAIN_STEPS=${MAX_TRAIN_STEPS:-0}
 
 BATCH_SIZE_JIT=${BATCH_SIZE_JIT:-16}
 LR_JIT=${LR_JIT:-2e-5}
@@ -113,10 +111,14 @@ online_eval_args=()
 if [[ "${ONLINE_EVAL}" == "1" ]]; then
   online_eval_args+=(--online_eval)
 fi
+max_train_args=()
+if [[ "${MAX_TRAIN_STEPS}" != "0" ]]; then
+  max_train_args+=(--max_train_steps "${MAX_TRAIN_STEPS}")
+fi
 
 cd "${ROOT_DIR}"
 
-CUDA_VISIBLE_DEVICES="${GPUS}" python -c "import torch; assert torch.cuda.is_available(), 'CUDA is unavailable'; print('GPUs:', torch.cuda.device_count(), [torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())], 'torch:', torch.__version__, 'CUDA:', torch.version.cuda)"
+CUDA_VISIBLE_DEVICES="${GPU}" python -c "import torch; assert torch.cuda.is_available(), 'CUDA is unavailable'; print('GPU:', torch.cuda.get_device_name(0), 'torch:', torch.__version__, 'CUDA:', torch.version.cuda)"
 
 if stage_enabled "JIT"; then
   echo "============================================================"
@@ -125,13 +127,11 @@ if stage_enabled "JIT"; then
   echo "CKPT_H_FOCUS=${CKPT_H_FOCUS}"
   echo "SCENE_BLUR_2_PATH=${SCENE_BLUR_2_PATH}"
   echo "JIT_OUTPUT_DIR=${JIT_OUTPUT_DIR}"
-  echo "GPUS=${GPUS}, batch=${BATCH_SIZE_JIT}, epochs=${EPOCHS_JIT}, lr=${LR_JIT}"
+  echo "GPU=${GPU}, batch=${BATCH_SIZE_JIT}, epochs=${EPOCHS_JIT}, lr=${LR_JIT}"
+  echo "max_train_steps=${MAX_TRAIN_STEPS}"
   echo "============================================================"
 
-  CUDA_VISIBLE_DEVICES="${GPUS}" torchrun \
-    --nproc_per_node="${NPROC}" \
-    --master_port="${MASTER_PORT_JIT}" \
-    main_jit.py \
+  CUDA_VISIBLE_DEVICES="${GPU}" python main_jit.py \
     --model "JiT-H/16" \
     --proj_dropout 0.0 \
     --img_size "${IMG_SIZE}" \
@@ -157,6 +157,7 @@ if stage_enabled "JIT"; then
     --resume_optimizer 0 \
     --scene_train_path "${SCENE_BLUR_2_PATH}" \
     --scene_val_path "${SCENE_BLUR_2_PATH}" \
+    "${max_train_args[@]}" \
     "${online_eval_args[@]}"
 fi
 
@@ -166,13 +167,11 @@ if stage_enabled "REFINER"; then
   echo "CKPT_H_BLUR=${CKPT_H_BLUR}"
   echo "SCENE_BLUR_2_PATH=${SCENE_BLUR_2_PATH}"
   echo "REFINER_OUTPUT_DIR=${REFINER_OUTPUT_DIR}"
-  echo "GPUS=${GPUS}, batch=${BATCH_SIZE_REFINER}, epochs=${EPOCHS_REFINER}, lr=${LR_REFINER}"
+  echo "GPU=${GPU}, batch=${BATCH_SIZE_REFINER}, epochs=${EPOCHS_REFINER}, lr=${LR_REFINER}"
+  echo "max_train_steps=${MAX_TRAIN_STEPS}"
   echo "============================================================"
 
-  CUDA_VISIBLE_DEVICES="${GPUS}" torchrun \
-    --nproc_per_node="${NPROC}" \
-    --master_port="${MASTER_PORT_REFINER}" \
-    main_jit.py \
+  CUDA_VISIBLE_DEVICES="${GPU}" python main_jit.py \
     --model "JiT-H/16" \
     --proj_dropout 0.0 \
     --img_size "${IMG_SIZE}" \
@@ -206,6 +205,7 @@ if stage_enabled "REFINER"; then
     --resume_optimizer 0 \
     --scene_train_path "${SCENE_BLUR_2_PATH}" \
     --scene_val_path "${SCENE_BLUR_2_PATH}" \
+    "${max_train_args[@]}" \
     "${online_eval_args[@]}"
 fi
 

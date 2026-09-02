@@ -40,6 +40,48 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--drop-pred-dir", default=DEFAULT_DROP_PRED_DIR, help="Flat Drop prediction directory.")
     parser.add_argument("--test-pred-dir", default=DEFAULT_TEST_PRED_DIR, help="Flat test prediction directory.")
     parser.add_argument("--manual-pair-dir", default="demo/test_pari_manual")
+    parser.add_argument(
+        "--auto-filter-pairs",
+        action="store_true",
+        help="Filter pair candidate images into <output-root>/auto_filtered_pairs and use them as manual pairs.",
+    )
+    parser.add_argument(
+        "--pair-candidate-dirs",
+        nargs="*",
+        default=[],
+        help="Candidate pair image directories, e.g. demo/test_group_pair demo/test_self_group_pair.",
+    )
+    parser.add_argument(
+        "--pair-candidate-csvs",
+        nargs="*",
+        default=[],
+        help="Optional metadata CSVs for candidate pairs. Rows should contain pair_image plus distance/rank columns.",
+    )
+    parser.add_argument(
+        "--calibrate-manual-pair-dir",
+        default="",
+        help="Optional manually accepted pair dir used to infer distance/margin/rank thresholds.",
+    )
+    parser.add_argument("--auto-pair-output-dir", default="", help="Default: <output-root>/auto_filtered_pairs.")
+    parser.add_argument("--auto-filter-max-rank", type=int, default=1)
+    parser.add_argument("--auto-filter-max-distance", type=float, default=0.0, help="0 = no fixed distance limit.")
+    parser.add_argument("--auto-filter-min-margin", type=float, default=-1.0, help="<0 = no fixed margin limit.")
+    parser.add_argument(
+        "--auto-filter-same-day-night",
+        action="store_true",
+        help="Require source/target group to be both day or both night.",
+    )
+    parser.add_argument(
+        "--auto-filter-manual-sources-only",
+        action="store_true",
+        help="When --calibrate-manual-pair-dir is set, only keep source groups present in that manual dir.",
+    )
+    parser.add_argument("--auto-filter-day-night-boundary", type=int, default=19)
+    parser.add_argument(
+        "--auto-filter-allow-datasets",
+        default="drop,test",
+        help="Comma-separated target datasets to keep: drop,test.",
+    )
     parser.add_argument("--output-root", default="demo/manual_group_pseudo")
     parser.add_argument("--pseudo-input-dir", default="", help="Defaults to <output-root>/pseudo_inputs.")
     parser.add_argument(
@@ -338,8 +380,33 @@ def build_unique_predictions(
 
 
 SOURCE_RE = re.compile(r"^group_(?P<source>\d+)_test_[^_]+__")
-DROP_TARGET_RE = re.compile(r"__drop_.*?group_(?P<target>\d+)_")
+DROP_TARGET_RE = re.compile(r"__drop_.*?(?:group_?)?(?P<target>\d+)_")
 TEST_TARGET_RE = re.compile(r"__match_(?P<target>\d+)_")
+RANK_RE = re.compile(r"_rank(?P<rank>\d+)")
+
+
+def safe_float(value: object, default: float = 0.0) -> float:
+    text = str(value).strip()
+    if not text:
+        return default
+    try:
+        return float(text)
+    except ValueError:
+        return default
+
+
+def safe_int(value: object, default: int = 0) -> int:
+    text = str(value).strip()
+    if not text:
+        return default
+    try:
+        return int(float(text))
+    except ValueError:
+        return default
+
+
+def pair_key(source_group: str, target_dataset: str, target_group: str) -> tuple[str, str, str]:
+    return source_group, target_dataset, target_group
 
 
 def parse_manual_pair_name(path: Path) -> tuple[str, str, str]:
@@ -357,6 +424,274 @@ def parse_manual_pair_name(path: Path) -> tuple[str, str, str]:
         return source_group, "test", f"group_{int(test_match.group('target')):03d}"
 
     raise ValueError(f"Cannot parse target group from manual pair name: {path.name}")
+
+
+def infer_rank_from_pair_name(name: str) -> int:
+    match = RANK_RE.search(name)
+    return int(match.group("rank")) if match else 1
+
+
+def infer_target_is_day(pair_name: str, target_dataset: str, target_group: str, boundary: int) -> bool | None:
+    lower = pair_name.lower()
+    if target_dataset == "drop":
+        if "__drop_night" in lower or "__night" in lower:
+            return False
+        if "__drop_day" in lower or "__day" in lower:
+            return True
+        return None
+    return manual_group_id(target_group) <= boundary
+
+
+def read_candidate_metadata(csv_paths: list[str]) -> dict[str, dict[str, object]]:
+    metadata: dict[str, dict[str, object]] = {}
+    for raw_path in csv_paths:
+        path = Path(raw_path)
+        if not path.exists():
+            raise FileNotFoundError(f"Pair candidate CSV not found: {path}")
+        with path.open("r", newline="", encoding="utf-8") as handle:
+            reader = csv.DictReader(handle)
+            for row in reader:
+                pair_image = str(row.get("pair_image", "")).strip()
+                if not pair_image:
+                    continue
+                distance = safe_float(
+                    row.get("distance", row.get("best_distance", row.get("match_distance", ""))),
+                    default=0.0,
+                )
+                margin = safe_float(
+                    row.get("margin_to_second", row.get("margin", "")),
+                    default=0.0,
+                )
+                rank = safe_int(row.get("match_rank", ""), default=infer_rank_from_pair_name(pair_image))
+                metadata[pair_image] = {
+                    "rank": rank,
+                    "distance": distance,
+                    "margin": margin,
+                    "metadata_csv": str(path),
+                }
+    return metadata
+
+
+def load_manual_positive_keys(manual_pair_dir: Path) -> set[tuple[str, str, str]]:
+    if not manual_pair_dir.is_dir():
+        raise FileNotFoundError(f"Calibration manual pair dir not found: {manual_pair_dir}")
+    positives: set[tuple[str, str, str]] = set()
+    for path in manual_pair_dir.iterdir():
+        if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS:
+            positives.add(pair_key(*parse_manual_pair_name(path)))
+    if not positives:
+        raise RuntimeError(f"No calibration pairs found in: {manual_pair_dir}")
+    return positives
+
+
+def collect_pair_candidates(
+    candidate_dirs: list[str],
+    candidate_csvs: list[str],
+) -> list[dict[str, object]]:
+    metadata = read_candidate_metadata(candidate_csvs)
+    candidates: list[dict[str, object]] = []
+    seen: set[Path] = set()
+    for raw_dir in candidate_dirs:
+        directory = Path(raw_dir)
+        if not directory.is_dir():
+            raise FileNotFoundError(f"Pair candidate directory not found: {directory}")
+        for path in sorted(directory.iterdir(), key=lambda item: item.name):
+            if not path.is_file() or path.suffix.lower() not in IMAGE_EXTENSIONS:
+                continue
+            resolved = path.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            source_group, target_dataset, target_group = parse_manual_pair_name(path)
+            row = dict(metadata.get(path.name, {}))
+            candidates.append({
+                "pair_image": path.name,
+                "pair_path": path,
+                "source_group": source_group,
+                "target_dataset": target_dataset,
+                "target_group": target_group,
+                "rank": int(row.get("rank", infer_rank_from_pair_name(path.name))),
+                "distance": float(row.get("distance", 0.0)),
+                "margin": float(row.get("margin", 0.0)),
+                "metadata_csv": str(row.get("metadata_csv", "")),
+            })
+    if not candidates:
+        raise RuntimeError(f"No pair candidate images found in: {candidate_dirs}")
+    return candidates
+
+
+def calibrated_thresholds(
+    candidates: list[dict[str, object]],
+    positives: set[tuple[str, str, str]],
+    fixed_max_rank: int,
+    fixed_max_distance: float,
+    fixed_min_margin: float,
+) -> dict[str, float | int]:
+    positive_candidates = [
+        candidate for candidate in candidates
+        if pair_key(
+            str(candidate["source_group"]),
+            str(candidate["target_dataset"]),
+            str(candidate["target_group"]),
+        )
+        in positives
+    ]
+    if not positive_candidates:
+        return {
+            "max_rank": fixed_max_rank,
+            "max_distance": fixed_max_distance,
+            "min_margin": fixed_min_margin,
+            "positive_candidates": 0,
+        }
+    max_rank = max(int(candidate["rank"]) for candidate in positive_candidates)
+    max_distance = max(float(candidate["distance"]) for candidate in positive_candidates)
+    min_margin = min(float(candidate["margin"]) for candidate in positive_candidates)
+    return {
+        "max_rank": max(max_rank, fixed_max_rank),
+        "max_distance": max(max_distance, fixed_max_distance) if fixed_max_distance > 0 else max_distance,
+        "min_margin": min(min_margin, fixed_min_margin) if fixed_min_margin >= 0 else min_margin,
+        "positive_candidates": len(positive_candidates),
+    }
+
+
+def filter_pair_candidates(args: argparse.Namespace, output_root: Path) -> Path:
+    if not args.pair_candidate_dirs:
+        raise ValueError("--auto-filter-pairs requires --pair-candidate-dirs")
+
+    output_dir = Path(args.auto_pair_output_dir) if args.auto_pair_output_dir else output_root / "auto_filtered_pairs"
+    reset_dir(output_dir, args.overwrite)
+
+    candidates = collect_pair_candidates(args.pair_candidate_dirs, args.pair_candidate_csvs)
+    allowed_datasets = {
+        item.strip()
+        for item in args.auto_filter_allow_datasets.split(",")
+        if item.strip()
+    }
+    positives: set[tuple[str, str, str]] = set()
+    if args.calibrate_manual_pair_dir:
+        positives = load_manual_positive_keys(Path(args.calibrate_manual_pair_dir))
+    positive_source_groups = {key[0] for key in positives}
+
+    thresholds = calibrated_thresholds(
+        candidates=candidates,
+        positives=positives,
+        fixed_max_rank=args.auto_filter_max_rank,
+        fixed_max_distance=args.auto_filter_max_distance,
+        fixed_min_margin=args.auto_filter_min_margin,
+    )
+    max_rank = int(thresholds["max_rank"])
+    max_distance = float(thresholds["max_distance"])
+    min_margin = float(thresholds["min_margin"])
+
+    accepted_by_source: dict[str, dict[str, object]] = {}
+    audit_rows: list[dict[str, object]] = []
+    for candidate in candidates:
+        source_group = str(candidate["source_group"])
+        target_dataset = str(candidate["target_dataset"])
+        target_group = str(candidate["target_group"])
+        rank = int(candidate["rank"])
+        distance = float(candidate["distance"])
+        margin = float(candidate["margin"])
+        reasons: list[str] = []
+
+        if target_dataset not in allowed_datasets:
+            reasons.append("target_dataset")
+        if args.auto_filter_manual_sources_only and source_group not in positive_source_groups:
+            reasons.append("manual_source")
+        if rank > max_rank:
+            reasons.append("rank")
+        if max_distance > 0 and distance > max_distance + 1e-12:
+            reasons.append("distance")
+        if min_margin >= 0 and margin < min_margin - 1e-12:
+            reasons.append("margin")
+        if args.auto_filter_same_day_night:
+            source_is_day = manual_group_id(source_group) <= args.auto_filter_day_night_boundary
+            target_is_day = infer_target_is_day(
+                str(candidate["pair_image"]),
+                target_dataset,
+                target_group,
+                args.auto_filter_day_night_boundary,
+            )
+            if target_is_day is not None and source_is_day != target_is_day:
+                reasons.append("day_night")
+
+        accepted = not reasons
+        if accepted:
+            old = accepted_by_source.get(source_group)
+            if old is None:
+                accepted_by_source[source_group] = candidate
+            else:
+                old_key = (
+                    int(old["rank"]),
+                    float(old["distance"]),
+                    -float(old["margin"]),
+                    str(old["target_dataset"]),
+                    str(old["target_group"]),
+                )
+                new_key = (
+                    rank,
+                    distance,
+                    -margin,
+                    target_dataset,
+                    target_group,
+                )
+                if new_key < old_key:
+                    accepted_by_source[source_group] = candidate
+
+        audit_rows.append({
+            "pair_image": candidate["pair_image"],
+            "source_group": source_group,
+            "target_dataset": target_dataset,
+            "target_group": target_group,
+            "rank": rank,
+            "distance": distance,
+            "margin": margin,
+            "accepted_before_dedup": int(accepted),
+            "reject_reasons": ",".join(reasons),
+            "manual_positive": int(pair_key(source_group, target_dataset, target_group) in positives),
+            "metadata_csv": candidate["metadata_csv"],
+        })
+
+    accepted_keys = {
+        str(candidate["pair_image"])
+        for candidate in accepted_by_source.values()
+    }
+    for row in audit_rows:
+        row["accepted"] = int(str(row["pair_image"]) in accepted_keys)
+
+    for candidate in sorted(
+        accepted_by_source.values(),
+        key=lambda item: manual_group_id(str(item["source_group"])),
+    ):
+        shutil.copy2(Path(candidate["pair_path"]), output_dir / str(candidate["pair_image"]))
+
+    if not accepted_by_source:
+        raise RuntimeError(
+            "Auto pair filtering produced no pairs. "
+            "Relax --auto-filter-max-rank/--auto-filter-max-distance/--auto-filter-min-margin."
+        )
+
+    with (output_dir / "filter_audit.csv").open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(audit_rows[0]))
+        writer.writeheader()
+        writer.writerows(audit_rows)
+
+    report = {
+        "candidate_dirs": args.pair_candidate_dirs,
+        "candidate_csvs": args.pair_candidate_csvs,
+        "output_dir": str(output_dir.resolve()),
+        "candidates": len(candidates),
+        "accepted_pairs": len(accepted_by_source),
+        "allowed_datasets": sorted(allowed_datasets),
+        "same_day_night": bool(args.auto_filter_same_day_night),
+        "manual_sources_only": bool(args.auto_filter_manual_sources_only),
+        "day_night_boundary": args.auto_filter_day_night_boundary,
+        "thresholds": thresholds,
+        "calibrate_manual_pair_dir": args.calibrate_manual_pair_dir,
+    }
+    write_json(output_dir / "filter_report.json", report)
+    print(json.dumps(report, indent=2, ensure_ascii=False))
+    return output_dir
 
 
 def build_manual_mapping(
@@ -528,11 +863,27 @@ def precheck_args(args: argparse.Namespace) -> None:
         args.test_input_dir,
         args.drop_pred_dir,
         args.test_pred_dir,
-        args.manual_pair_dir,
     ):
         path = Path(raw)
         if not path.is_dir():
             missing.append(path)
+    if args.auto_filter_pairs:
+        for raw in args.pair_candidate_dirs:
+            path = Path(raw)
+            if not path.is_dir():
+                missing.append(path)
+        for raw in args.pair_candidate_csvs:
+            path = Path(raw)
+            if not path.is_file():
+                missing.append(path)
+        if args.calibrate_manual_pair_dir:
+            path = Path(args.calibrate_manual_pair_dir)
+            if not path.is_dir():
+                missing.append(path)
+    else:
+        manual_pair_dir = Path(args.manual_pair_dir)
+        if not manual_pair_dir.is_dir():
+            missing.append(manual_pair_dir)
 
     drop_groups_csv = Path(args.drop_groups_csv) if args.drop_groups_csv else None
     if drop_groups_csv is not None and not drop_groups_csv.is_file():
@@ -693,8 +1044,10 @@ def main() -> None:
     drop_unique = build_unique_predictions("drop", drop_mapping, output_root, args)
     test_unique = build_unique_predictions("test", test_mapping, output_root, args)
 
+    pair_dir = filter_pair_candidates(args, output_root) if args.auto_filter_pairs else Path(args.manual_pair_dir)
+
     image_mapping = build_manual_mapping(
-        Path(args.manual_pair_dir),
+        pair_dir,
         test_mapping,
         {"drop": drop_unique, "test": test_unique},
         output_root,
@@ -795,6 +1148,8 @@ def main() -> None:
         "drop_pred_dir": args.drop_pred_dir,
         "test_pred_dir": args.test_pred_dir,
         "manual_pair_dir": args.manual_pair_dir,
+        "effective_pair_dir": str(pair_dir.resolve()),
+        "auto_filter_pairs": bool(args.auto_filter_pairs),
         "output_root": str(output_root.resolve()),
         "pseudo_input_dir": str(pseudo_input_dir.resolve()),
         "pseudo_label_image_dir": str(pseudo_label_image_dir.resolve()),

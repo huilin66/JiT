@@ -22,6 +22,18 @@ TEST_PRED_DIR=${TEST_PRED_DIR:-demo/ensemble_submit/submission_ensemble_uniform_
 
 MANUAL_PAIR_DIR=${MANUAL_PAIR_DIR:-${ROOT_DIR}/demo/test_pari_manual}
 OUTPUT_ROOT=${OUTPUT_ROOT:-${ROOT_DIR}/demo/manual_group_pseudo}
+AUTO_FILTER_PAIRS=${AUTO_FILTER_PAIRS:-0}
+AUTO_PAIR_OUTPUT_DIR=${AUTO_PAIR_OUTPUT_DIR:-${OUTPUT_ROOT}/auto_filtered_pairs}
+PAIR_CANDIDATE_DIRS=${PAIR_CANDIDATE_DIRS:-"${ROOT_DIR}/demo/test_group_pair ${ROOT_DIR}/demo/test_drop_group_pair ${ROOT_DIR}/demo/test_self_group_pair"}
+PAIR_CANDIDATE_CSVS=${PAIR_CANDIDATE_CSVS:-"${ROOT_DIR}/demo/test_group_pair/summary.csv ${ROOT_DIR}/demo/test_drop_group_pair/summary.csv ${ROOT_DIR}/demo/test_self_group_pairing/group_matches.csv"}
+CALIBRATE_MANUAL_PAIR_DIR=${CALIBRATE_MANUAL_PAIR_DIR:-${MANUAL_PAIR_DIR}}
+AUTO_FILTER_MAX_RANK=${AUTO_FILTER_MAX_RANK:-1}
+AUTO_FILTER_MAX_DISTANCE=${AUTO_FILTER_MAX_DISTANCE:-0}
+AUTO_FILTER_MIN_MARGIN=${AUTO_FILTER_MIN_MARGIN:--1}
+AUTO_FILTER_SAME_DAY_NIGHT=${AUTO_FILTER_SAME_DAY_NIGHT:-1}
+AUTO_FILTER_MANUAL_SOURCES_ONLY=${AUTO_FILTER_MANUAL_SOURCES_ONLY:-0}
+AUTO_FILTER_ALLOW_DATASETS=${AUTO_FILTER_ALLOW_DATASETS:-drop,test}
+AUTO_FILTER_DAY_NIGHT_BOUNDARY=${AUTO_FILTER_DAY_NIGHT_BOUNDARY:-19}
 PSEUDO_INPUT_DIR=${PSEUDO_INPUT_DIR:-}
 PSEUDO_LABEL_IMAGE_DIR=${PSEUDO_LABEL_IMAGE_DIR:-}
 PSEUDO_LABEL_DIR=${PSEUDO_LABEL_DIR:-}
@@ -72,7 +84,21 @@ check_dir "DROP_INPUT_DIR" "${DROP_INPUT_DIR}"
 check_dir "TEST_INPUT_DIR" "${TEST_INPUT_DIR}"
 check_dir "DROP_PRED_DIR" "${DROP_PRED_DIR}"
 check_dir "TEST_PRED_DIR" "${TEST_PRED_DIR}"
-check_dir "MANUAL_PAIR_DIR" "${MANUAL_PAIR_DIR}"
+if [[ "${AUTO_FILTER_PAIRS}" == "1" ]]; then
+  read -r -a pair_candidate_dirs <<< "${PAIR_CANDIDATE_DIRS}"
+  read -r -a pair_candidate_csvs <<< "${PAIR_CANDIDATE_CSVS}"
+  for path in "${pair_candidate_dirs[@]}"; do
+    check_dir "PAIR_CANDIDATE_DIR" "${path}"
+  done
+  for path in "${pair_candidate_csvs[@]}"; do
+    check_file "PAIR_CANDIDATE_CSV" "${path}"
+  done
+  if [[ -n "${CALIBRATE_MANUAL_PAIR_DIR}" ]]; then
+    check_dir "CALIBRATE_MANUAL_PAIR_DIR" "${CALIBRATE_MANUAL_PAIR_DIR}"
+  fi
+else
+  check_dir "MANUAL_PAIR_DIR" "${MANUAL_PAIR_DIR}"
+fi
 check_dir "RAIN_TRAIN_DIR" "${RAIN_TRAIN_DIR}"
 check_dir "RainDrop_Train/Drop" "${RAIN_TRAIN_DIR}/Drop"
 check_dir "RainDrop_Train/Clear" "${RAIN_TRAIN_DIR}/Clear"
@@ -116,6 +142,33 @@ args=(
   --train-copy-prefix "${TRAIN_COPY_PREFIX}"
 )
 
+if [[ "${AUTO_FILTER_PAIRS}" == "1" ]]; then
+  args+=(
+    --auto-filter-pairs
+    --auto-pair-output-dir "${AUTO_PAIR_OUTPUT_DIR}"
+    --auto-filter-max-rank "${AUTO_FILTER_MAX_RANK}"
+    --auto-filter-max-distance "${AUTO_FILTER_MAX_DISTANCE}"
+    --auto-filter-min-margin "${AUTO_FILTER_MIN_MARGIN}"
+    --auto-filter-allow-datasets "${AUTO_FILTER_ALLOW_DATASETS}"
+    --auto-filter-day-night-boundary "${AUTO_FILTER_DAY_NIGHT_BOUNDARY}"
+  )
+  read -r -a pair_candidate_dirs <<< "${PAIR_CANDIDATE_DIRS}"
+  read -r -a pair_candidate_csvs <<< "${PAIR_CANDIDATE_CSVS}"
+  args+=(--pair-candidate-dirs "${pair_candidate_dirs[@]}")
+  if [[ "${#pair_candidate_csvs[@]}" -gt 0 ]]; then
+    args+=(--pair-candidate-csvs "${pair_candidate_csvs[@]}")
+  fi
+  if [[ -n "${CALIBRATE_MANUAL_PAIR_DIR}" ]]; then
+    args+=(--calibrate-manual-pair-dir "${CALIBRATE_MANUAL_PAIR_DIR}")
+  fi
+  if [[ "${AUTO_FILTER_SAME_DAY_NIGHT}" == "1" ]]; then
+    args+=(--auto-filter-same-day-night)
+  fi
+  if [[ "${AUTO_FILTER_MANUAL_SOURCES_ONLY}" == "1" ]]; then
+    args+=(--auto-filter-manual-sources-only)
+  fi
+fi
+
 if [[ -n "${PSEUDO_LABEL_DIR}" ]]; then
   args+=(--pseudo-label-dir "${PSEUDO_LABEL_DIR}")
 fi
@@ -149,6 +202,13 @@ echo "TEST_INPUT_DIR=${TEST_INPUT_DIR}"
 echo "DROP_PRED_DIR=${DROP_PRED_DIR}"
 echo "TEST_PRED_DIR=${TEST_PRED_DIR}"
 echo "MANUAL_PAIR_DIR=${MANUAL_PAIR_DIR}"
+echo "AUTO_FILTER_PAIRS=${AUTO_FILTER_PAIRS}"
+if [[ "${AUTO_FILTER_PAIRS}" == "1" ]]; then
+  echo "AUTO_PAIR_OUTPUT_DIR=${AUTO_PAIR_OUTPUT_DIR}"
+  echo "PAIR_CANDIDATE_DIRS=${PAIR_CANDIDATE_DIRS}"
+  echo "PAIR_CANDIDATE_CSVS=${PAIR_CANDIDATE_CSVS}"
+  echo "CALIBRATE_MANUAL_PAIR_DIR=${CALIBRATE_MANUAL_PAIR_DIR}"
+fi
 echo "OUTPUT_ROOT=${OUTPUT_ROOT}"
 echo "RAIN_TRAIN_DIR=${RAIN_TRAIN_DIR}"
 echo "OUTPUT_FOCUS2SCENE_JSON=${OUTPUT_FOCUS2SCENE_JSON}"

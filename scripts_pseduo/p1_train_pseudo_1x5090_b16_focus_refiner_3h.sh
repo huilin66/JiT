@@ -40,6 +40,7 @@ NUM_SAMPLING_STEPS=${NUM_SAMPLING_STEPS:-1}
 SAVE_LAST_FREQ=${SAVE_LAST_FREQ:-5}
 LOG_FREQ=${LOG_FREQ:-50}
 ONLINE_EVAL=${ONLINE_EVAL:-1}
+MAX_TRAIN_STEPS=${MAX_TRAIN_STEPS:-0}
 RESUME_STATE_KEY=${RESUME_STATE_KEY:-model_ema1}
 
 REFINER_BASE_DIM=${REFINER_BASE_DIM:-32}
@@ -89,6 +90,10 @@ online_eval_args=()
 if [[ "${ONLINE_EVAL}" == "1" ]]; then
   online_eval_args+=(--online_eval)
 fi
+max_train_args=()
+if [[ "${MAX_TRAIN_STEPS}" != "0" ]]; then
+  max_train_args+=(--max_train_steps "${MAX_TRAIN_STEPS}")
+fi
 
 cd "${ROOT_DIR}"
 
@@ -99,6 +104,7 @@ echo "CKPT=${CKPT}"
 echo "SCENE_FOCUS_2_PATH=${SCENE_FOCUS_2_PATH}"
 echo "OUT_ROOT=${OUT_ROOT}"
 echo "GPU=${GPU}, batch=${BATCH_SIZE}, epochs=${EPOCHS}, lr=${LR}"
+echo "max_train_steps=${MAX_TRAIN_STEPS}"
 echo "refiner_max_residual=${REFINER_MAX_RESIDUAL}, edge=${LOSS_EDGE_WEIGHT}, freq=${LOSS_FREQ_WEIGHT}"
 echo "============================================================"
 
@@ -140,6 +146,7 @@ CUDA_VISIBLE_DEVICES="${GPU}" python main_jit.py \
   --resume_optimizer 0 \
   --scene_train_path "${SCENE_FOCUS_2_PATH}" \
   --scene_val_path "${SCENE_FOCUS_2_PATH}" \
+  "${max_train_args[@]}" \
   "${online_eval_args[@]}"
 
 echo "Pseudo B16 focus2scene refiner finetune finished."
