@@ -16,7 +16,15 @@ set -euo pipefail
 
 OUTPUT_ROOT=${OUTPUT_ROOT:-submissions/ensemble_submit}
 MODEL_NAME=${MODEL_NAME:-submission_ensemble}
-INPUT_DIRS=${INPUT_DIRS:-}
+# INPUT_DIRS=${INPUT_DIRS:-D:/zhl/project/JiT/submissions/jit_submit_last_model_ema1_s1_r16_hflip_rot90_last_20260705_224730,D:/zhl/project/MSDT/submissions/msdt_1x5090/msdt_no_scene_best_20260704_204642}
+# INPUT_DIRS=${INPUT_DIRS:-D:/zhl/project/JiT/submissions/jit_submit_last_model_ema1_s1_r16_hflip_rot90_last_20260705_224730,D:/zhl/project/JiT/submissions/jit_submit_last_model_ema1_s1_r16_hflip_rot90_last_20260706_155237,D:/zhl/project/MSDT/submissions/msdt_1x5090/msdt_no_scene_best_20260704_204642}
+# INPUT_DIRS=${INPUT_DIRS:-D:/zhl/project/JiT/submissions/jit_submit_last_model_ema1_s1_r16_hflip_rot90_last_20260705_115716,D:/zhl/project/MSDT/submissions/msdt_1x5090/msdt_no_scene_best_20260704_204642}
+ 
+#  INPUT_DIRS=${INPUT_DIRS:-submissions/jit_submit_best_model_ema1_s1_r16_hflip_vflip_rot90_rot180_rot270_best_20260709_205940, D:/zhl/project/MSDT/submissions/msdt_1x5090/msdt_scene_last_20260709_184313}
+
+INPUT_DIRS=${INPUT_DIRS:-submissions/jit_submit_best_model_ema1_s1_r16_hflip_rot90_best_20260708_223003, submissions/jit_submit_best_model_ema1_s1_r16_hflip_rot90_best_20260708_233937,D:/zhl/project/MSDT/submissions/msdt_1x5090/msdt_no_scene_last_20260708_215016}
+
+
 WEIGHTS=${WEIGHTS:-}
 WEIGHTS_LIST=${WEIGHTS_LIST:-}
 HISTORY_CSV=${HISTORY_CSV:-${OUTPUT_ROOT}/ensemble_history.csv}
