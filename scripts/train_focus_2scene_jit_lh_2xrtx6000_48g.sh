@@ -99,7 +99,7 @@ run_exp() {
     "${online_eval_args[@]}"
 }
 
-run_exp "jit_l16_focus_2scene_no_head" "JiT-L/16" "${CKPT_L}" "${BATCH_SIZE_L}" "${LR_L}" "$((MASTER_PORT_BASE + 0))"
+# run_exp "jit_l16_focus_2scene_no_head" "JiT-L/16" "${CKPT_L}" "${BATCH_SIZE_L}" "${LR_L}" "$((MASTER_PORT_BASE + 0))"
 run_exp "jit_h16_focus_2scene_no_head" "JiT-H/16" "${CKPT_H}" "${BATCH_SIZE_H}" "${LR_H}" "$((MASTER_PORT_BASE + 1))"
 
 echo "JiT-L/H focus_2scene 2xRTX6000 training finished."
